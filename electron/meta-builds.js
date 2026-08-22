@@ -9,6 +9,14 @@ const STARTERS = new Set([
   2003, 2031, 3070, 3850, 3851, 3854, 3855, 3858, 3859,
   3862, 3863, 3865, 3866, 3867, 1035, 1039, 1041, 1036, 1028, 1027,
 ]);
+
+const ROLE_STARTERS = {
+  Top: [1054],
+  Jungle: [1101],
+  Mid: [1056],
+  ADC: [1055],
+  Support: [3865],
+};
 const SLUG = {
   MonkeyKing: 'wukong',
   Wukong: 'wukong',
@@ -72,6 +80,45 @@ function startersFrom(rows) {
   return found;
 }
 
+/** First buy from early paths when it is a real fountain starter (Doran's, Cull, etc.). */
+function startersFromEarly(earlySet) {
+  const tally = new Map();
+  for (const row of earlySet || []) {
+    const path = parseEarly(row);
+    if (!path) continue;
+    const id = path.ids[0];
+    if (!STARTERS.has(id) || PETS.has(id)) continue;
+    tally.set(id, (tally.get(id) || 0) + path.games);
+  }
+  return [...tally.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => id)
+    .slice(0, 2);
+}
+
+function resolveStarters(role, itemSet1, earlySet, tags) {
+  // Jungle fountain buy is always a jungle pet companion.
+  if (role === 'Jungle') {
+    const pet = junglePet(earlySet);
+    if (pet?.id) return [pet.id];
+    const tally = new Map();
+    for (const row of earlySet || []) {
+      const path = parseEarly(row);
+      if (!path || !PETS.has(path.ids[0])) continue;
+      tally.set(path.ids[0], (tally.get(path.ids[0]) || 0) + path.games);
+    }
+    const best = [...tally.entries()].sort((a, b) => b[1] - a[1])[0];
+    return [best?.[0] || 1101];
+  }
+
+  // Early paths are real fountain buys; itemSet1 is often first completed legendary.
+  const fromEarly = startersFromEarly(earlySet);
+  if (fromEarly.length) return fromEarly;
+  const fromSet = startersFrom(itemSet1).filter((id) => !PETS.has(id));
+  if (fromSet.length) return fromSet;
+  return starterFallback(role, tags);
+}
+
 function situationalFor(core, rows) {
   const prefix = `${core.join('_')}_`;
   const extra = [];
@@ -100,7 +147,25 @@ function perkIdsOf(arr, max) {
   return out;
 }
 
-function runePage(summary, key, spells) {
+function orderSpells(spells) {
+  const ids = (spells || []).map(Number).filter((id) => id > 0);
+  if (ids.includes(4)) return [4, ...ids.filter((id) => id !== 4)].slice(0, 2);
+  return ids.slice(0, 2);
+}
+
+/** Ranked meta summoner pair — not the player's current lobby spells. */
+function resolveMetaSpells(role, tags) {
+  if (role === 'Jungle') return [4, 11];
+  if (role === 'ADC') return [4, 21];
+  if (role === 'Support') return [4, 3];
+  if (role === 'Top') return [4, 12];
+  if (role === 'Mid') return [4, 14];
+  if (tags?.includes('Marksman')) return [4, 21];
+  if (tags?.includes('Support')) return [4, 3];
+  return [4, 14];
+}
+
+function runePage(summary, key, spells, role, tags) {
   const pack = summary?.runes?.[key];
   if (!pack?.set?.pri) return null;
   const pri = perkIdsOf(pack.set.pri, 4);
@@ -109,12 +174,16 @@ function runePage(summary, key, spells) {
   const selectedPerkIds = [...pri, ...sec, ...mod];
   if (selectedPerkIds.length < 6) return null;
   while (selectedPerkIds.length < 9) selectedPerkIds.push(5008);
+  const hasPlayerSpells = Array.isArray(spells) && spells.filter(Boolean).length >= 2;
+  const loadout = hasPlayerSpells
+    ? orderSpells(spells)
+    : resolveMetaSpells(role, tags);
   return {
     name: 'Rift Draft',
     primaryStyleId: styleId(pack.page?.pri),
     subStyleId: styleId(pack.page?.sec),
     selectedPerkIds: selectedPerkIds.slice(0, 9),
-    spells: (spells || []).slice(0, 2),
+    spells: loadout,
     games: Number(pack.n) || 0,
     wr: Number(pack.wr) || 0,
   };
@@ -143,6 +212,48 @@ function junglePet(earlySet) {
     tally.set(path.ids[0], cur);
   }
   return [...tally.values()].sort((a, b) => b.games - a.games)[0] || null;
+}
+
+let champTagCache = null;
+async function loadChampTags() {
+  if (champTagCache) return champTagCache;
+  try {
+    const verRes = await httpGet('https://ddragon.leagueoflegends.com/api/versions.json');
+    const ver = Array.isArray(verRes) ? verRes[0] : null;
+    if (!ver) return {};
+    const data = await httpGet(`https://ddragon.leagueoflegends.com/cdn/${ver}/data/en_US/champion.json`);
+    const map = {};
+    Object.values(data.data || {}).forEach((ch) => {
+      map[ch.id] = ch.tags || [];
+      map[String(ch.name || '').replace(/[^a-zA-Z0-9]/g, '')] = ch.tags || [];
+    });
+    champTagCache = map;
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function roleFromTags(tags) {
+  const t = tags || [];
+  if (t.includes('Marksman')) return 'ADC';
+  if (t.includes('Support') && !t.includes('Fighter') && !t.includes('Tank')) return 'Support';
+  // Ambessa, Sett, Darius, etc. — Fighter (+ Assassin) defaults to Top, not Mid.
+  if (t.includes('Fighter') || t.includes('Tank')) return 'Top';
+  if (t.includes('Mage')) return 'Mid';
+  if (t.includes('Assassin')) return 'Mid';
+  return 'Top';
+}
+
+function starterFallback(role, tags) {
+  const t = tags || [];
+  if (role === 'Jungle') return [1101];
+  if (role === 'ADC' || t.includes('Marksman')) return [1055];
+  if (role === 'Support' || (t.includes('Support') && !t.includes('Fighter'))) return [3865];
+  if (t.includes('Mage') || (role === 'Mid' && !t.includes('Fighter') && !t.includes('Assassin'))) return [1056];
+  if (t.includes('Fighter') || t.includes('Tank') || role === 'Top') return [1054];
+  if (t.includes('Assassin')) return [1055];
+  return [...(ROLE_STARTERS[role] || [1054])];
 }
 
 function prioFromSeq(seq, games, wr) {
@@ -216,17 +327,101 @@ function pickSkill(list, wantWr) {
   return list[1] || list[0];
 }
 
+/** Distinct skill max-orders for each build tab (most played, then alts). */
+function skillForBuildIndex(list, index) {
+  if (!list?.length) return null;
+  if (index <= 0) return list[0];
+  const seen = new Set([list[0].id]);
+  const alts = [];
+  for (const s of list) {
+    if (!s?.id || seen.has(s.id)) continue;
+    seen.add(s.id);
+    alts.push(s);
+  }
+  return alts[index - 1] || pickSkill(list, true) || list[0];
+}
+
 function pickPaths(itemSet3) {
   const paths = (itemSet3 || []).map(parsePath).filter(Boolean);
   if (!paths.length) return [];
   paths.sort((a, b) => b.games - a.games);
-  const most = paths[0];
-  const floor = Math.max(80, Math.round(most.games * 0.12));
-  const wrSorted = paths.filter((p) => p.games >= floor).sort((a, b) => b.wr - a.wr || b.games - a.games);
-  const bestWr = wrSorted[0] && wrSorted[0].ids.join('_') !== most.ids.join('_')
-    ? wrSorted[0]
-    : paths[1] || null;
-  return [most, bestWr].filter(Boolean);
+  // Top 3 distinct openings (like DPM's build tabs) — not only most-played + WR.
+  const out = [];
+  const seen = new Set();
+  for (const p of paths) {
+    const key = p.ids.slice(0, 2).join('_');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+/** Starter candidates with play volume — used to pick by enemy comp. */
+function starterOptionsFrom(earlySet, itemSet1, role, tags) {
+  const tally = new Map();
+  for (const row of earlySet || []) {
+    const path = parseEarly(row);
+    if (!path) continue;
+    const id = path.ids[0];
+    if (!STARTERS.has(id) || PETS.has(id)) continue;
+    const cur = tally.get(id) || { id, games: 0, wr: 0, wrGames: 0 };
+    cur.games += path.games;
+    if (path.games > cur.wrGames) {
+      cur.wr = path.wr;
+      cur.wrGames = path.games;
+    }
+    tally.set(id, cur);
+  }
+  for (const id of startersFrom(itemSet1)) {
+    if (PETS.has(id)) continue;
+    if (!tally.has(id)) tally.set(id, { id, games: 1, wr: 0, wrGames: 0 });
+  }
+  // Always offer the common role fountain buys so comp logic can choose them.
+  for (const id of starterFallback(role, tags)) {
+    if (!tally.has(id)) tally.set(id, { id, games: 0, wr: 0, wrGames: 0 });
+  }
+  // Long Sword is a real DPM-style opener into ER / lethality even when rare as "most played".
+  if ((role === 'ADC' || role === 'Mid' || role === 'Top') && !tally.has(1036)) {
+    tally.set(1036, { id: 1036, games: 0, wr: 0, wrGames: 0 });
+  }
+  if ((role === 'ADC' || role === 'Top') && !tally.has(1054)) {
+    tally.set(1054, { id: 1054, games: 0, wr: 0, wrGames: 0 });
+  }
+  return [...tally.values()].sort((a, b) => b.games - a.games).slice(0, 6);
+}
+
+function labelForPath(ids, index) {
+  const a = Number(ids?.[0]) || 0;
+  const NAMES = {
+    3153: 'On-hit shred',
+    3124: 'On-hit shred',
+    3085: 'On-hit shred',
+    3091: 'On-hit shred',
+    6672: 'AS / Kraken',
+    3508: 'AD haste caster',
+    3095: 'AD haste caster',
+    6676: 'Crit snowball',
+    3031: 'Crit',
+    6691: 'Lethality snowball',
+    6692: 'Lethality snowball',
+    6693: 'Lethality snowball',
+    6694: 'Lethality snowball',
+    6695: 'Lethality snowball',
+    6696: 'Lethality snowball',
+    3179: 'Lethality snowball',
+    3814: 'Lethality snowball',
+    3078: 'Bruiser',
+    6631: 'Bruiser',
+    3071: 'Bruiser',
+    6655: 'AP burst',
+    6653: 'AP control',
+    3118: 'AP',
+    4645: 'AP',
+  };
+  if (NAMES[a]) return NAMES[a];
+  return index === 0 ? 'Most played' : (index === 1 ? 'Alt build' : 'Situational');
 }
 
 async function httpGet(url) {
@@ -259,9 +454,13 @@ function megaUrl(ep, slug, lane) {
 
 async function fetchMetaBuilds({ champion, role, spells } = {}) {
   const slug = slugOf(champion);
-  const lane = LANE[role] || 'middle';
   if (!slug) return { ok: false, builds: [] };
-  const key = `${slug}|${lane}`;
+
+  const tagMap = await loadChampTags();
+  const tags = tagMap[champion] || tagMap[slugOf(champion)] || tagMap[String(champion || '').replace(/[^a-zA-Z0-9]/g, '')] || [];
+  const resolvedRole = LANE[role] ? role : roleFromTags(tags);
+  const lane = LANE[resolvedRole] || 'top';
+  const key = `${slug}|${lane}|v4`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.data;
 
@@ -275,28 +474,44 @@ async function fetchMetaBuilds({ champion, role, spells } = {}) {
     const sets = itemJson?.itemSets || {};
     const paths = pickPaths(sets.itemSet3);
     const boot = topBoot(sets.itemBootSet1);
-    const start = startersFrom(sets.itemSet1).filter((id) => !PETS.has(id));
+    const start = resolveStarters(resolvedRole, sets.itemSet1, earlyJson?.earlySet, tags);
+    const starterOptions = starterOptionsFrom(earlyJson?.earlySet, sets.itemSet1, resolvedRole, tags);
     const pet = junglePet(earlyJson?.earlySet);
-    const pickRunes = runePage(runeJson?.summary, 'pick', spells);
-    const winRunes = runePage(runeJson?.summary, 'win', spells);
+    const petId = resolvedRole === 'Jungle'
+      ? (pet?.id || start[0] || 1101)
+      : (pet?.id || null);
+    const pickRunes = runePage(runeJson?.summary, 'pick', spells, resolvedRole, tags);
+    const winRunes = runePage(runeJson?.summary, 'win', spells, resolvedRole, tags);
     const builds = paths.map((path, i) => {
       const runes = i === 0 ? pickRunes : (winRunes || pickRunes);
       return {
-        id: i === 0 ? 'most' : 'wr',
-        label: i === 0 ? 'Most played' : 'Highest winrate',
+        id: i === 0 ? 'most' : `alt${i}`,
+        label: labelForPath(path.ids, i),
         games: path.games,
         wr: path.wr,
         core: path.ids.slice(0, 3),
         boots: boot,
-        starters: start,
-        pet: pet || null,
-        skills: pickSkill(skills, i > 0),
+        starters: resolvedRole === 'Jungle' ? [petId] : start,
+        starterOptions: resolvedRole === 'Jungle'
+          ? [{ id: petId, games: pet?.games || 0, wr: pet?.wr || 0 }]
+          : starterOptions,
+        pet: petId,
+        skills: skillForBuildIndex(skills, i),
         extra: situationalFor(path.ids.slice(0, 3), sets.itemSet4 || sets.itemSet5),
         runes,
+        role: resolvedRole,
         source: 'Lolalytics emerald+',
       };
     });
-    const data = { ok: true, builds, source: 'Lolalytics' };
+    const data = {
+      ok: true,
+      builds,
+      role: resolvedRole,
+      source: 'Lolalytics',
+      starterOptions,
+      skillOptions: (skills || []).slice(0, 5),
+    };
+    // Bust old cache shape (2 builds / no starterOptions).
     cache.set(key, { at: Date.now(), data });
     return data;
   } catch (err) {

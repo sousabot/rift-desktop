@@ -32,8 +32,25 @@ export function parseRiotIdInput(nameInput = '', tagInput = '') {
   };
 }
 
-export function linkErrorMessage(err) {
+export function linkErrorMessage(err, t) {
   const msg = String(err?.message || err || '');
+  if (msg === 'LCU_CLIENT_CLOSED' || msg.startsWith('LCU_CLIENT_CLOSED')) {
+    return t ? t('link.needLeagueOpen') : 'Open the League of Legends client and log in to the account you want to link.';
+  }
+  if (msg === 'LCU_NOT_LOGGED_IN' || msg.startsWith('LCU_NOT_LOGGED_IN')) {
+    return t ? t('link.needLeagueLogin') : 'League is open but you are not logged in. Sign in to the account you want to link.';
+  }
+  if (msg.startsWith('LCU_MISMATCH')) {
+    const loggedInAs = msg.includes(':') ? msg.slice(msg.indexOf(':') + 1) : '';
+    if (t) {
+      return loggedInAs
+        ? t('link.mismatch', { id: loggedInAs })
+        : t('link.mismatchGeneric');
+    }
+    return loggedInAs
+      ? `League is logged in as ${loggedInAs}. Link that Riot ID, or switch accounts in League.`
+      : 'The Riot ID does not match the account logged into League.';
+  }
   const lower = msg.toLowerCase();
   if (lower.includes('abort') || lower.includes('timeout') || lower.includes('timed out')) {
     return 'Rift.lol API took too long. Wait a few seconds and try again — the first request wakes the server.';

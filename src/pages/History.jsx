@@ -1,27 +1,142 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getSummonerDashboard } from '../services/riotApi';
-import { ChampionIcon } from '../components/GameIcons';
+import { ChampionIcon, ItemIcon, RuneIcon, SpellIcon } from '../components/GameIcons';
 import RoleIcon from '../components/RoleIcon';
 import MatchReview from '../components/MatchReview';
-import { parsePlayerSearch, parseRiotId } from '../lib/playerRoute';
+import { parsePlayerSearch, parseProIdentity, parseRiotId } from '../lib/playerRoute';
+import { countryName, flagUrl } from '../lib/countryFlag';
 import { apiUserMessage, noticeFromError } from '../lib/apiNotice';
 import { isPlausibleLpDelta } from '../lib/lpHistory';
 import { MODE_KEYS, MODE_LABEL, MODE_QUEUE } from '../lib/queues';
+import { rankColor, rankEmblemClass, rankImg } from '../lib/rankEmblem';
 import { useSession } from '../state/SessionContext';
 import { useI18n } from '../i18n/LocaleContext';
 import './History.css';
 
 function lpChangeLabel(game) {
-  const measured = isPlausibleLpDelta(game.lpDelta);
-  const n = measured ? Number(game.lpDelta) : Number(game.lpDeltaEst);
-  if (!isPlausibleLpDelta(n)) return '—';
-  return `${measured ? '' : '~'}${n > 0 ? '+' : ''}${Math.round(n)}`;
+  if (!isPlausibleLpDelta(game.lpDelta)) return '';
+  const n = Math.round(Number(game.lpDelta));
+  return n > 0 ? `+${n}` : String(n);
+}
+
+function teamCaption(identity) {
+  const team = String(identity?.team || '').trim();
+  const short = String(identity?.short || '').trim();
+  if (!team) return short;
+  if (short && !team.toLowerCase().includes(short.toLowerCase())) return `${team} · ${short}`;
+  return team;
+}
+
+function padFive(list) {
+  const names = (Array.isArray(list) ? list : []).slice(0, 5);
+  while (names.length < 5) names.push('');
+  return names;
+}
+
+function fmtClock(min, sec) {
+  return `${min}:${String(sec || 0).padStart(2, '0')}`;
+}
+
+function pct(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n <= 1 ? n * 100 : n);
+}
+
+function HistoryRow({ game, t, onOpen }) {
+  const lp = lpChangeLabel(game);
+  const items = Array.isArray(game.items) ? game.items : [];
+  const core = items.slice(0, 6);
+  while (core.length < 6) core.push(0);
+  const trinket = items[6] || 0;
+  const kp = pct(game.kp);
+  const dmg = pct(game.damageShare);
+  const kdaBits = [
+    `${game.kda} KDA`,
+    game.cs != null ? `${game.cs} CS` : '',
+    kp != null ? `${kp}% ${t('history.kp')}` : '',
+    dmg != null ? `${dmg}% ${t('history.dmg')}` : '',
+  ].filter(Boolean);
+
+  return (
+    <button
+      type="button"
+      className={`hs-row hs-row--${game.win ? 'win' : 'loss'}`}
+      onClick={onOpen}
+      aria-label={t('history.openMatch')}
+    >
+      <span className={`hs-result ${game.win ? 'win' : 'loss'}`}>
+        <em>{game.win ? t('history.win') : t('history.loss')}</em>
+        {lp ? (
+          <strong className={`hs-lp-badge${Number(game.lpDelta) > 0 ? ' is-up' : ' is-down'}`}>
+            {lp}
+          </strong>
+        ) : null}
+      </span>
+
+      <div className="hs-loadout">
+        <div className="hs-champ-wrap">
+          <ChampionIcon name={game.champion} size={48} className="hs-champ" />
+          {game.champLevel ? <span className="hs-level">{game.champLevel}</span> : null}
+        </div>
+        <div className="hs-summs">
+          {(game.spells || []).slice(0, 2).map((id, i) => (
+            <SpellIcon key={`sp-${i}`} id={id} size={16} />
+          ))}
+        </div>
+        {game.runes?.keystone ? <RuneIcon id={game.runes.keystone} size={22} /> : null}
+      </div>
+
+      <div className="hs-mid">
+        <div className="hs-champ-name">
+          {game.role ? <RoleIcon role={game.role} size={14} /> : null}
+          {game.champion}
+        </div>
+        <div className="hs-meta">{[game.queueLabel || game.queueType, game.ago].filter(Boolean).join(' · ')}</div>
+      </div>
+
+      <div className="hs-kda">
+        <strong>{game.kills}/{game.deaths}/{game.assists}</strong>
+        <span>{kdaBits.join(' · ')}</span>
+      </div>
+
+      <div className="hs-items">
+        {core.map((id, i) => <ItemIcon key={`it-${i}`} id={id} size={22} />)}
+        <span className="hs-trinket"><ItemIcon id={trinket} size={22} /></span>
+      </div>
+
+      <div className="hs-teams">
+        <div className="hs-team hs-team--ally">
+          {padFive(game.allyTeam).map((name, i) => (
+            name
+              ? <ChampionIcon key={`a-${i}`} name={name} size={18} title={name} />
+              : <span key={`a-${i}`} className="hs-team-empty" />
+          ))}
+        </div>
+        <div className="hs-team hs-team--enemy">
+          {padFive(game.enemyTeam).map((name, i) => (
+            name
+              ? <ChampionIcon key={`e-${i}`} name={name} size={18} title={name} />
+              : <span key={`e-${i}`} className="hs-team-empty" />
+          ))}
+        </div>
+      </div>
+
+      <div className="hs-tail">
+        <strong>{game.gdScore ?? '—'}</strong>
+        <span>{t('history.rift')}</span>
+        <em>{fmtClock(game.durationMin, game.durationSec)}</em>
+      </div>
+      <span className="hs-chevron" aria-hidden>›</span>
+    </button>
+  );
 }
 
 export default function History() {
   const { session } = useSession();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const qParam = parsePlayerSearch(searchParams);
@@ -33,6 +148,7 @@ export default function History() {
   const [error, setError] = useState('');
   const [mode, setMode] = useState('Solo');
   const [review, setReview] = useState(null);
+  const [proIdentity, setProIdentity] = useState(null);
 
   const sessionLookup = {
     region: session?.region || 'europe',
@@ -80,7 +196,37 @@ export default function History() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, session?.platform, session?.region]);
 
+  useEffect(() => {
+    const riotId = String(activeId || '').trim();
+    const hinted = parseProIdentity(searchParams);
+    if (!riotId.includes('#')) {
+      setProIdentity(null);
+      return undefined;
+    }
+    setProIdentity(hinted);
+    const api = typeof window !== 'undefined' ? window.prosAPI : null;
+    if (!api?.lookup) return undefined;
+    let cancelled = false;
+    api.lookup(riotId).then((res) => {
+      if (cancelled) return;
+      if (res?.ok && res.identity) setProIdentity(res.identity);
+      else if (!hinted) setProIdentity(null);
+    }).catch(() => {
+      if (!cancelled && !hinted) setProIdentity(null);
+    });
+    return () => { cancelled = true; };
+  }, [activeId, searchParams]);
+
   const games = profile?.recentGames || [];
+  const sample = useMemo(() => {
+    const wins = games.filter((g) => g.win).length;
+    const losses = games.length - wins;
+    const wr = games.length ? Math.round((wins / games.length) * 100) : null;
+    return { wins, losses, wr };
+  }, [games]);
+  const pool = (profile?.championPerformance || []).slice(0, 3);
+  const rc = rankColor(profile?.rank);
+  const org = teamCaption(proIdentity);
 
   return (
     <div className="hs-page">
@@ -89,7 +235,7 @@ export default function History() {
           <h1>{t('history.title')}</h1>
           <p>
             {activeId
-              ? `${activeId} · ${profile?.region || ''} · ${loading ? t('history.loading') : t('history.games', { n: games.length, mode: MODE_LABEL[mode].toLowerCase() })}`
+              ? `${activeId} · ${profile?.region || ''}`
               : t('history.linkBlurb')}
           </p>
         </div>
@@ -120,46 +266,70 @@ export default function History() {
       ) : loading || !profile ? (
         <div className="hs-empty">{t('common.loading')}</div>
       ) : (
-        <div className="hs-list">
-          {games.map((g) => (
-            <button
-              key={g.matchId}
-              type="button"
-              className={`hs-row hs-row--${g.win ? 'win' : 'loss'}`}
-              onClick={() => setReview(g)}
-              aria-label={t('history.openMatch')}
-            >
-              <span className={`hs-result ${g.win ? 'win' : 'loss'}`}>{g.win ? 'WIN' : 'LOSS'}</span>
-              <ChampionIcon name={g.champion} size={40} className="hs-champ" />
-              <span className="hs-role">{g.role ? <RoleIcon role={g.role} size={16} /> : null}</span>
-              <div className="hs-mid">
-                <div className="hs-champ-name">{g.champion}</div>
-                <div className="hs-meta">{g.queueLabel || g.queueType} · {g.region || ''} · {g.ago}</div>
+        <>
+          <div className="hs-summary">
+            <div className="hs-rank" style={{ '--rc': rc }}>
+              {rankImg(profile.rank) ? (
+                <img src={rankImg(profile.rank)} alt="" className={rankEmblemClass(profile.rank, 'hs-rank-emblem')} />
+              ) : null}
+              <div>
+                <strong>{profile.rank && profile.rank !== 'Unavailable' ? profile.rank : t('dash.unranked')}</strong>
+                <span>
+                  {profile.lp != null ? `${profile.lp} LP` : ''}
+                  {profile.lp != null && profile.region ? ' · ' : ''}
+                  {profile.region || ''}
+                </span>
               </div>
-              <div className="hs-kda">
-                <strong>{g.kills}/{g.deaths}/{g.assists}</strong>
-                <span>{g.kda} KDA</span>
+            </div>
+            <div className="hs-sample">
+              <strong>
+                {sample.wr != null
+                  ? t('history.record', { w: sample.wins, l: sample.losses, wr: sample.wr })
+                  : t('history.noGames')}
+              </strong>
+              <span>{t('history.sample')} · {t('history.games', { n: games.length, mode: MODE_LABEL[mode].toLowerCase() })}</span>
+            </div>
+            {pool.length ? (
+              <div className="hs-pool" title={t('history.mostPlayed')}>
+                {pool.map((row) => (
+                  <div key={row.champion} className="hs-pool-champ">
+                    <ChampionIcon name={row.champion} size={22} />
+                    <span>
+                      <b>{row.champion}</b>
+                      {row.record ? ` ${row.record}` : ''}
+                    </span>
+                  </div>
+                ))}
               </div>
-              <div className={`hs-lp${(g.lpDelta || g.lpDeltaEst) > 0 ? ' is-up' : (g.lpDelta || g.lpDeltaEst) < 0 ? ' is-down' : ''}${!g.lpDelta && g.lpDeltaEst ? ' is-est' : ''}`}>
-                <strong title={!g.lpDelta && g.lpDeltaEst ? t('dash.lpEstHint') : undefined}>
-                  {lpChangeLabel(g)}
-                </strong>
-                <span>LP</span>
+            ) : null}
+            {proIdentity && (proIdentity.country || proIdentity.team) ? (
+              <div className="hs-pro">
+                {proIdentity.country ? (
+                  <span className="hs-pro-chip">
+                    {flagUrl(proIdentity.country) ? (
+                      <img src={flagUrl(proIdentity.country, 40)} alt="" />
+                    ) : null}
+                    {countryName(proIdentity.country, locale)}
+                    {proIdentity.lane ? ` · ${proIdentity.lane}` : ''}
+                  </span>
+                ) : null}
+                {org ? (
+                  <span className="hs-pro-chip hs-pro-chip--team">
+                    {proIdentity.logo ? <img src={proIdentity.logo} alt="" /> : null}
+                    {org}
+                  </span>
+                ) : null}
               </div>
-              <div className="hs-rift">
-                <strong>{g.gdScore ?? '—'}</strong>
-                <span>Rift</span>
-              </div>
-              <div className="hs-cs">
-                <strong>{g.cs}</strong>
-                <span>CS</span>
-              </div>
-              <div className="hs-dur">{g.durationMin}:{String(g.durationSec || 0).padStart(2, '0')}</div>
-              <span className="hs-chevron" aria-hidden>›</span>
-            </button>
-          ))}
-          {!games.length && <div className="hs-empty">No games in this queue yet.</div>}
-        </div>
+            ) : null}
+          </div>
+
+          <div className="hs-list">
+            {games.map((g) => (
+              <HistoryRow key={g.matchId} game={g} t={t} onOpen={() => setReview(g)} />
+            ))}
+            {!games.length && <div className="hs-empty">{t('history.noGames')}</div>}
+          </div>
+        </>
       )}
 
       {review && (

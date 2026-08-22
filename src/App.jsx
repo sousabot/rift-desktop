@@ -2,10 +2,12 @@ import React from 'react';
 import { Routes, Route, Outlet, Navigate } from 'react-router-dom';
 import { SessionProvider } from './state/SessionContext';
 import { LocaleProvider } from './i18n/LocaleContext';
+import { PremiumProvider } from './state/PremiumContext';
 import TitleBar from './components/TitleBar';
 import Sidebar from './components/Sidebar';
 import ApiNotice from './components/ApiNotice';
 import UpdateBanner from './components/UpdateBanner';
+import PremiumGate from './components/PremiumGate';
 import Dashboard from './pages/Dashboard';
 import Leaderboard from './pages/Leaderboard';
 import LiveStatus from './pages/LiveStatus';
@@ -18,13 +20,19 @@ import Collections from './pages/Collections';
 import Draft from './pages/Draft';
 import Spectate from './pages/Spectate';
 import Pros from './pages/Pros';
+import Studio from './pages/Studio';
+import Lens from './pages/Lens';
+import Premium from './pages/Premium';
+import Overlays from './pages/Overlays';
+import OverlayHud from './pages/OverlayHud';
 
 export default function App() {
   return (
     <LocaleProvider>
-      <SessionProvider>
+      <PremiumProvider>
+        <SessionProvider>
         <Routes>
-          <Route path="/overlay" element={<Navigate to="/" replace />} />
+          <Route path="/overlay" element={<OverlayHud />} />
           <Route element={<AppShell />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/leaderboard" element={<Leaderboard />} />
@@ -38,12 +46,16 @@ export default function App() {
             <Route path="/draft" element={<Draft />} />
             <Route path="/spectate" element={<Spectate />} />
             <Route path="/pros" element={<Pros />} />
-            <Route path="/overlays" element={<Navigate to="/" replace />} />
+            <Route path="/studio" element={<PremiumGate><Studio /></PremiumGate>} />
+            <Route path="/lens" element={<PremiumGate><Lens /></PremiumGate>} />
+            <Route path="/premium" element={<Premium />} />
+            <Route path="/overlays" element={<Overlays />} />
             <Route path="/link-account" element={<LinkAccount />} />
             <Route path="/login" element={<Login />} />
           </Route>
         </Routes>
-      </SessionProvider>
+        </SessionProvider>
+      </PremiumProvider>
     </LocaleProvider>
   );
 }

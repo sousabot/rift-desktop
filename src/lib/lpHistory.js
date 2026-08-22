@@ -47,62 +47,15 @@ export function rememberLpDelta(riotId, mode, matchId, lpDelta) {
 export function formatLpDelta(value, estimated = false) {
   if (!isPlausibleLpDelta(value)) return null;
   const rounded = Math.round(Number(value));
-  return `${estimated ? '~' : ''}${rounded > 0 ? '+' : ''}${rounded} LP`;
+  const signed = rounded > 0 ? `+${rounded}` : String(rounded);
+  return `${estimated ? '~' : ''}${signed} LP`;
 }
 
-function clamp(n, lo, hi) {
-  return Math.max(lo, Math.min(hi, n));
-}
-
-export function estimateLpDelta({ win, visibleMmr, hiddenMmr, lobbyMmr } = {}) {
-  const me = Number.isFinite(Number(hiddenMmr)) ? Number(hiddenMmr)
-    : Number.isFinite(Number(visibleMmr)) ? Number(visibleMmr)
-      : null;
-  const opp = Number.isFinite(Number(lobbyMmr)) ? Number(lobbyMmr) : me;
-  if (me == null || opp == null) return win ? 18 : -16;
-  const expected = 1 / (1 + 10 ** ((opp - me) / 400));
-  const raw = Math.round(20 * ((win ? 1 : 0) - expected));
-  if (win) return clamp(raw || 12, 8, 32);
-  return -clamp(Math.abs(raw) || 12, 8, 32);
-}
-
-function lobbyMmrNear(lobbyMmrs, endedAt) {
-  const t = Number(endedAt);
-  if (!Number.isFinite(t) || !Array.isArray(lobbyMmrs)) return null;
-  let best = null;
-  let bestDiff = 45 * 60 * 1000;
-  for (const row of lobbyMmrs) {
-    const at = Number(row?.at);
-    const mmr = Number(row?.mmr);
-    if (!Number.isFinite(at) || !Number.isFinite(mmr)) continue;
-    const diff = Math.abs(at - t);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      best = mmr;
-    }
-  }
-  return best;
-}
-
-const ESTIMATE_WITHIN_MS = 14 * 24 * 60 * 60 * 1000;
-
-export function attachEstimatedLp(games, { visibleMmr, hiddenMmr, lobbyMmrs } = {}) {
-  const list = Array.isArray(games) ? games : [];
-  const now = Date.now();
-  return list.map((g) => {
-    if (isPlausibleLpDelta(g?.lpDelta)) return g;
-    if (g?.queueId !== 420 && g?.queueId !== 440) return g;
-    if ((Number(g.durationMin) || 0) < 5) return g;
-    const ended = Number(g.endedAt);
-    if (!Number.isFinite(ended) || now - ended > ESTIMATE_WITHIN_MS) return g;
-    const lpDeltaEst = estimateLpDelta({
-      win: g.win,
-      visibleMmr,
-      hiddenMmr,
-      lobbyMmr: lobbyMmrNear(lobbyMmrs, ended),
-    });
-    return { ...g, lpDeltaEst };
-  });
+function deltaFitsGame(game, delta) {
+  if (!isPlausibleLpDelta(delta)) return false;
+  if (game?.win === true && delta < 0) return false;
+  if (game?.win === false && delta > 0) return false;
+  return true;
 }
 
 export function matchNumericId(matchId) {
@@ -118,7 +71,7 @@ export function applyTrackedLp(games, lpByNumericId, riotId, mode) {
   return games.map((g) => {
     const id = matchNumericId(g.matchId);
     const n = Number(id ? map[id] : null);
-    if (!isPlausibleLpDelta(n)) return g;
+    if (!deltaFitsGame(g, n)) return g;
     rememberLpDelta(riotId, mode, g.matchId, n);
     return { ...g, lpDelta: Math.round(n), lpDeltaEst: null };
   });
@@ -133,11 +86,9 @@ export function applyLpNotes(games, notes, riotId, mode, queueId) {
     const delta = Math.round(Number(note?.lpDelta));
     if (!isPlausibleLpDelta(delta)) continue;
     const gid = note.gameId != null ? String(note.gameId) : '';
-    let target = gid
-      ? ranked.find((g) => matchNumericId(g.matchId) === gid)
-      : null;
-    if (!target) target = ranked.find((g) => g.matchId && !used.has(g.matchId));
-    if (!target?.matchId) continue;
+    if (!gid) continue;
+    const target = ranked.find((g) => matchNumericId(g.matchId) === gid && !used.has(g.matchId));
+    if (!target?.matchId || !deltaFitsGame(target, delta)) continue;
     used.add(target.matchId);
     next[target.matchId] = delta;
     rememberLpDelta(riotId, mode, target.matchId, delta);
@@ -182,6 +133,7 @@ export function syncMatchLp({ riotId, mode, lp, tier, division, games, queueId }
         && delta !== 0
         && delta >= -50
         && delta <= 50
+        && deltaFitsGame(newest, delta)
       ) {
         rememberLpDelta(riotId, mode, newest.matchId, delta);
       }

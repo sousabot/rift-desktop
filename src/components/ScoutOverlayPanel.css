@@ -1,0 +1,364 @@
+.ov-scout-panel.is-preview {
+  width: 1140px;
+  max-height: 780px;
+}
+
+.ov-scout-preview-fit {
+  width: 100%;
+  overflow: hidden;
+}
+
+.ov-scout-preview-inner {
+  transform-origin: top left;
+  will-change: transform;
+}
+
+.ov-scout-panel {
+  width: min(1140px, 97vw);
+  max-height: min(780px, 90vh);
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 16, 24, 0.96);
+  border: 1px solid rgba(150, 175, 230, 0.45);
+  border-radius: 10px;
+  color: #fff;
+  overflow: hidden;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+}
+.ov-scout-panel.is-edit {
+  outline: 1px solid rgba(124, 92, 255, 0.9);
+  box-shadow: 0 0 0 2px rgba(124, 92, 255, 0.28);
+  cursor: move;
+}
+
+.ov-scout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ov-scout-head strong {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(180, 190, 220, 0.92);
+}
+.ov-scout-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ov-scout-hotkey {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.55;
+  white-space: nowrap;
+}
+.ov-scout-head-actions button {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.ov-scout-body {
+  display: grid;
+  grid-template-columns: minmax(540px, 1.12fr) minmax(400px, 0.88fr);
+  min-height: 520px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.ov-scout-grid-wrap {
+  padding: 10px;
+  overflow: auto;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+.ov-scout-team + .ov-scout-team {
+  margin-top: 10px;
+}
+.ov-scout-team-label {
+  margin: 0 0 4px 2px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(180, 190, 220, 0.65);
+}
+.ov-scout-team-label.is-red { color: rgba(255, 150, 150, 0.75); }
+
+.ov-scout-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.ov-scout-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 196px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #12141c;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ov-scout-card.is-on {
+  border-color: rgba(158, 182, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(158, 182, 255, 0.35);
+}
+.ov-scout-card.is-self {
+  border-color: rgba(255, 215, 107, 0.75);
+}
+.ov-scout-card.is-empty {
+  opacity: 0.25;
+  pointer-events: none;
+  min-height: 196px;
+}
+.ov-scout-card img.ov-scout-splash {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+  pointer-events: none;
+}
+.ov-scout-card-fade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10,12,18,0.2) 0%, rgba(10,12,18,0.05) 28%, rgba(10,12,18,0.55) 62%, rgba(10,12,18,0.96) 100%);
+}
+.ov-scout-card-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  padding: 6px 6px 0;
+  text-align: center;
+}
+.ov-scout-card-champ {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+.ov-scout-card-champwr {
+  margin-top: 2px;
+  font-size: 9px;
+  font-weight: 800;
+  color: #ffd76b;
+}
+.ov-scout-card-streak {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 900;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.ov-scout-card-streak.is-hot { background: rgba(220, 90, 60, 0.92); }
+.ov-scout-card-streak.is-cold { background: rgba(70, 120, 200, 0.92); }
+.ov-scout-card-last3 {
+  display: flex;
+  justify-content: center;
+  gap: 3px;
+  margin-top: 4px;
+}
+.ov-scout-card-last3 span {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+}
+.ov-scout-card-last3 .is-w { background: rgba(70, 180, 120, 0.85); }
+.ov-scout-card-last3 .is-l { background: rgba(200, 70, 90, 0.85); }
+
+.ov-scout-card-bottom {
+  position: relative;
+  z-index: 1;
+  padding: 6px 6px 7px;
+}
+.ov-scout-card-name {
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-scout-card-meta {
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.25;
+  color: rgba(220, 225, 240, 0.85);
+}
+.ov-scout-card-icons {
+  margin-top: 5px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.ov-scout-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 6px;
+}
+.ov-scout-ptag {
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1.2;
+  padding: 2px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-scout-ptag.is-good {
+  background: rgba(45, 130, 75, 0.92);
+  color: #eafff0;
+}
+.ov-scout-ptag.is-bad {
+  background: rgba(175, 55, 65, 0.92);
+  color: #ffecee;
+}
+.ov-scout-ptag.is-neutral {
+  background: rgba(90, 98, 118, 0.88);
+  color: #eef1f8;
+}
+
+.ov-scout-side {
+  padding: 10px 12px;
+  overflow: auto;
+  min-width: 0;
+}
+.ov-scout-side-head {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+.ov-scout-build .dr-meta {
+  margin-bottom: 0;
+  padding: 10px 12px;
+}
+.ov-scout-build .dr-meta-head {
+  margin-bottom: 12px;
+}
+.ov-scout-build .dr-meta-tabs {
+  flex-direction: column;
+  gap: 6px;
+}
+.ov-scout-build .dr-meta-tab {
+  flex: none;
+  width: 100%;
+  padding: 8px 10px;
+  gap: 10px;
+}
+.ov-scout-build .dr-meta-tab-copy strong {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-scout-build .dr-meta-tab-copy em {
+  font-size: 10px;
+}
+.ov-scout-build .dr-meta-wr {
+  font-size: 11px;
+  padding: 4px 7px;
+}
+.ov-scout-build .dr-meta-top {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px 16px;
+}
+.ov-scout-build .dr-meta-runes {
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  max-height: none;
+  overflow: visible;
+  gap: 10px;
+}
+.ov-scout-build .dr-meta-rune-col {
+  max-height: none;
+  overflow: visible;
+}
+.ov-scout-build .dr-meta-col {
+  min-width: 0;
+}
+.ov-scout-build .dr-meta-path {
+  gap: 8px;
+}
+.ov-scout-build .dr-meta-note {
+  font-size: 10px;
+  line-height: 1.35;
+}
+.ov-scout-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 10px;
+}
+.ov-scout-tag {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 200, 140, 0.45);
+  color: #b8f0c8;
+  background: rgba(40, 90, 55, 0.35);
+}
+
+.ov-scout-chip {
+  border: 1px solid rgba(150, 175, 230, 0.55);
+  background: rgba(22, 26, 42, 0.92);
+  color: #fff;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.ov-scout-chip.is-edit {
+  outline: 1px solid rgba(124, 92, 255, 0.9);
+  cursor: move;
+}
+
+.ov-scout-wait,
+.ov-scout-empty {
+  padding: 16px 12px;
+  font-size: 11px;
+  color: rgba(180, 190, 220, 0.75);
+}

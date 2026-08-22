@@ -26,11 +26,14 @@ function wr(profile) {
 
 function peakOf(profile) {
   const current = rankSnapshot(profile?.rankTier, profile?.rankDivision, profile?.lp);
+  const season = profile?.seasonPeak
+    ? rankSnapshot(profile.seasonPeak.tier, profile.seasonPeak.division, profile.seasonPeak.lp)
+    : null;
   let stored = null;
   try {
     stored = JSON.parse(localStorage.getItem(`rift-peak-rank:${String(profile?.riotId || '').toLowerCase()}:Solo`) || 'null');
   } catch { /* ignore */ }
-  return mergePeakRank(stored, current);
+  return mergePeakRank(stored, current, season);
 }
 
 function FormDots({ games = [] }) {

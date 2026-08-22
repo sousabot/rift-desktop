@@ -48,3 +48,21 @@
   font-size: 12px; font-weight: 700;
   cursor: pointer;
 }
+
+.rift-link-lcu {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.rift-link-lcu--ok {
+  background: rgba(52, 199, 140, 0.1);
+  border: 1px solid rgba(52, 199, 140, 0.28);
+  color: #7ddeb4;
+}
+.rift-link-lcu--warn {
+  background: rgba(255, 176, 64, 0.1);
+  border: 1px solid rgba(255, 176, 64, 0.28);
+  color: #ffc46a;
+}

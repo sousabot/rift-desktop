@@ -133,7 +133,17 @@ function PlayerSheet({ player, locale, t, onOpen, onClose }) {
           ) : null}
         </div>
         {player.riotId ? (
-          <Link className="pr-open" to={playerSearchPath(player.riotId)}>
+          <Link
+            className="pr-open"
+            to={playerSearchPath(player.riotId, '', {
+              player: player.player,
+              country: player.country,
+              team: player.team,
+              short: player.short,
+              league: player.league,
+              lane: player.lane,
+            })}
+          >
             {t('pros.openProfile')}
           </Link>
         ) : null}
@@ -170,7 +180,17 @@ function PlayerSheet({ player, locale, t, onOpen, onClose }) {
             <ul className="pr-accounts">
               {player.accounts.map((acc, i) => (
                 <li key={acc.riotId}>
-                  <Link className="pr-acc" to={playerSearchPath(acc.riotId)}>
+                  <Link
+                    className="pr-acc"
+                    to={playerSearchPath(acc.riotId, '', {
+                      player: player.player,
+                      country: player.country,
+                      team: player.team,
+                      short: player.short,
+                      league: player.league,
+                      lane: player.lane,
+                    })}
+                  >
                     {acc.rank?.tier && rankImg(acc.rank.tier) ? (
                       <img src={rankImg(acc.rank.tier)} alt="" />
                     ) : <span className="pr-acc-gap" />}

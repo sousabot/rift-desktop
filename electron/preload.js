@@ -22,6 +22,18 @@ contextBridge.exposeInMainWorld('riotAPI', {
   getUggMatchLp: (args) => ipcRenderer.invoke('ugg:matchLp', args),
   getLastMatchIdsBulk: (args) => ipcRenderer.invoke('riot:getLastMatchIdsBulk', args),
   getTierList: (args) => ipcRenderer.invoke('riot:getTierList', args),
+  getLensBenchmarks: (args) => ipcRenderer.invoke('lens:getBenchmarks', args),
+  onLensBenchmarksReady: (cb) => {
+    const handler = (_e, value) => cb(value);
+    ipcRenderer.on('lens:benchmarksReady', handler);
+    return () => ipcRenderer.removeListener('lens:benchmarksReady', handler);
+  },
+  getStudioMeta: (args) => ipcRenderer.invoke('studio:getMeta', args),
+  onStudioMetaReady: (cb) => {
+    const handler = (_e, value) => cb(value);
+    ipcRenderer.on('studio:metaReady', handler);
+    return () => ipcRenderer.removeListener('studio:metaReady', handler);
+  },
   onTierListProgress: (cb) => {
     const handler = (_e, value) => cb(value);
     ipcRenderer.on('tierlist:progress', handler);
@@ -51,6 +63,11 @@ contextBridge.exposeInMainWorld('windowControls', {
 contextBridge.exposeInMainWorld('riftAPI', {
   sendFeedback: (payload) => ipcRenderer.invoke('app:sendFeedback', payload),
   appInfo: () => ipcRenderer.invoke('app:info'),
+  premiumStatus: () => ipcRenderer.invoke('premium:status'),
+  premiumCheckout: (args) => ipcRenderer.invoke('premium:checkout', args),
+  premiumRedeem: (args) => ipcRenderer.invoke('premium:redeem', args),
+  premiumRedeemGift: (args) => ipcRenderer.invoke('premium:redeemGift', args),
+  premiumOpen: (url) => ipcRenderer.invoke('premium:open', url),
 });
 
 contextBridge.exposeInMainWorld('riftUpdate', {
@@ -86,6 +103,7 @@ contextBridge.exposeInMainWorld('metaBuildsAPI', {
 contextBridge.exposeInMainWorld('prosAPI', {
   list: (args) => ipcRenderer.invoke('pros:list', args),
   get: (name) => ipcRenderer.invoke('pros:player', name),
+  lookup: (riotId) => ipcRenderer.invoke('pros:lookup', riotId),
 });
 
 contextBridge.exposeInMainWorld('spectateAPI', {
@@ -147,9 +165,28 @@ contextBridge.exposeInMainWorld('liveClient', {
   isEditMode: () => ipcRenderer.invoke('overlay:getEditMode'),
   toggleEditMode: () => ipcRenderer.invoke('overlay:toggleEdit'),
   startDrag: () => ipcRenderer.send('overlay:startDrag'),
+  getLayout: () => ipcRenderer.invoke('overlay:getLayout'),
+  setPanelPos: (id, point) => ipcRenderer.invoke('overlay:setPanelPos', id, point),
+  onLayout: (cb) => {
+    const handler = (_e, value) => cb(value);
+    ipcRenderer.on('overlay:layout', handler);
+    return () => ipcRenderer.removeListener('overlay:layout', handler);
+  },
   onEditMode: (cb) => {
     const handler = (_e, value) => cb(value);
     ipcRenderer.on('overlay:editMode', handler);
     return () => ipcRenderer.removeListener('overlay:editMode', handler);
+  },
+  onScoutToggle: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('overlay:scoutToggle', handler);
+    return () => ipcRenderer.removeListener('overlay:scoutToggle', handler);
+  },
+  getPanelToggles: () => ipcRenderer.invoke('overlay:getPanelToggles'),
+  setPanelToggle: (id, enabled) => ipcRenderer.invoke('overlay:setPanelToggle', id, enabled),
+  onPanelToggles: (cb) => {
+    const handler = (_e, value) => cb(value);
+    ipcRenderer.on('overlay:panelToggles', handler);
+    return () => ipcRenderer.removeListener('overlay:panelToggles', handler);
   },
 });

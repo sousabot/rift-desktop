@@ -8,6 +8,21 @@ export function parsePlayerSearch(searchParams) {
   return '';
 }
 
+export function parseProIdentity(searchParams) {
+  const identity = {
+    name: String(searchParams.get('pro') || '').trim(),
+    country: String(searchParams.get('cc') || '').trim(),
+    team: String(searchParams.get('org') || '').trim(),
+    short: String(searchParams.get('ot') || '').trim(),
+    league: String(searchParams.get('lg') || '').trim(),
+    logo: '',
+    lane: String(searchParams.get('ln') || '').trim(),
+    slug: '',
+  };
+  if (!identity.name && !identity.country && !identity.team) return null;
+  return identity;
+}
+
 export function parseRiotId(raw, fallbackTag = '') {
   const text = String(raw || '').trim();
   if (!text) return null;
@@ -22,10 +37,20 @@ export function parseRiotId(raw, fallbackTag = '') {
   return { gameName, tagLine };
 }
 
-export function playerSearchPath(riotId, fallbackTag = '') {
+export function playerSearchPath(riotId, fallbackTag = '', extra = {}) {
   const parsed = parseRiotId(riotId, fallbackTag);
   if (!parsed) return '/';
-  return `/?name=${encodeURIComponent(parsed.gameName)}&tag=${encodeURIComponent(parsed.tagLine)}`;
+  const params = new URLSearchParams({
+    name: parsed.gameName,
+    tag: parsed.tagLine,
+  });
+  if (extra.player) params.set('pro', extra.player);
+  if (extra.country) params.set('cc', extra.country);
+  if (extra.team) params.set('org', extra.team);
+  if (extra.short) params.set('ot', extra.short);
+  if (extra.league) params.set('lg', extra.league);
+  if (extra.lane) params.set('ln', extra.lane);
+  return `/?${params.toString()}`;
 }
 
 export function playerQuery(riotId, fallbackTag = '') {

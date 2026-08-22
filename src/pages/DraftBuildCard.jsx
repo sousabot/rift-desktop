@@ -92,6 +92,7 @@ export default function DraftBuildCard({
   const shards = perkIds.slice(6, 9);
   const loadoutSpells = (runes?.spells || spells || []).slice(0, 2);
   const jungle = role === 'Jungle';
+  const starters = (build.starters || []).map(Number).filter((id) => id > 0);
 
   return (
     <section className="dr-meta">
@@ -175,6 +176,12 @@ export default function DraftBuildCard({
         </div>
 
         <div className="dr-meta-path">
+          {starters.map((id, i) => (
+            <React.Fragment key={`start-${id}-${i}`}>
+              <ItemIcon id={id} size={32} />
+              <i>›</i>
+            </React.Fragment>
+          ))}
           {jungle && build.boots ? (
             <>
               <ItemIcon id={build.boots} size={32} />

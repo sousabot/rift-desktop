@@ -65,13 +65,15 @@ public class GdFind {
       if (t.IndexOf("GD Esports", StringComparison.OrdinalIgnoreCase) >= 0) return true;
       if (t.IndexOf("Rift.lol", StringComparison.OrdinalIgnoreCase) >= 0) return true;
       if (t.IndexOf("RIFT.LOL", StringComparison.OrdinalIgnoreCase) >= 0) return true;
-      bool byPid = pids.Count > 0 && pids.Contains(pid);
-      bool byTitle = t.IndexOf("League of Legends (TM)", StringComparison.OrdinalIgnoreCase) >= 0
-        || t.IndexOf("League of Legends (TM) Client", StringComparison.OrdinalIgnoreCase) >= 0;
+      // Prefer the in-game client, not Riot Client / launcher chrome.
+      bool gameClient = t.IndexOf("League of Legends (TM) Client", StringComparison.OrdinalIgnoreCase) >= 0;
+      bool gameTitle = gameClient
+        || t.IndexOf("League of Legends (TM)", StringComparison.OrdinalIgnoreCase) >= 0;
       bool byClass = c.IndexOf("RiotWindowClass", StringComparison.OrdinalIgnoreCase) >= 0;
+      bool byPid = pids.Count > 0 && pids.Contains(pid);
       if (pids.Count > 0) {
-        if (!byPid) return true;
-      } else if (!byTitle && !byClass) {
+        if (!byPid && !gameClient) return true;
+      } else if (!gameTitle && !byClass) {
         return true;
       }
       RECT r;
@@ -80,7 +82,8 @@ public class GdFind {
       if (w < 200 || hgt < 200) return true;
       int score = w * hgt;
       if (IsWindowVisible(h)) score += 50000000;
-      if (byClass) score += 200000000;
+      if (gameClient) score += 500000000;
+      if (byClass && gameTitle) score += 200000000;
       if (byPid) score += 100000000;
       if (score > bestScore) {
         bestScore = score;

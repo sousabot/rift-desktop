@@ -22,6 +22,7 @@ const cache = {
   leagues: { at: 0, list: [] },
   ladder: new Map(),
   profiles: new Map(),
+  byRiot: new Map(),
 };
 
 function sleep(ms) {
@@ -507,9 +508,82 @@ async function getPro(slugOrName) {
   }
 }
 
+function riotKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function playerHasRiotId(player, want) {
+  if (!player || !want) return false;
+  if (riotKey(player.riotId) === want) return true;
+  return (player.accounts || []).some((acc) => riotKey(acc.riotId) === want);
+}
+
+function identityFromPlayer(player) {
+  if (!player) return null;
+  const identity = {
+    name: String(player.player || '').trim(),
+    country: String(player.country || '').trim(),
+    team: String(player.team || '').trim(),
+    short: String(player.short || '').trim(),
+    logo: String(player.logo || '').trim(),
+    league: String(player.league || '').trim(),
+    lane: String(player.lane || '').trim(),
+    slug: String(player.slug || '').trim(),
+  };
+  if (!identity.country && !identity.team && !identity.name) return null;
+  return identity;
+}
+
+async function lookupPro(riotId) {
+  const want = riotKey(riotId);
+  if (!want.includes('#')) return { ok: false };
+  const cached = cache.byRiot.get(want);
+  if (cached && Date.now() - cached.at < TTL_MS) {
+    return { ok: true, identity: cached.identity };
+  }
+  const remember = (identity) => {
+    if (!identity) return { ok: false };
+    cache.byRiot.set(want, { at: Date.now(), identity });
+    return { ok: true, identity };
+  };
+  for (const hit of cache.profiles.values()) {
+    if (playerHasRiotId(hit.player, want)) return remember(identityFromPlayer(hit.player));
+  }
+  for (const packed of cache.ladder.values()) {
+    for (const row of packed.players || []) {
+      if (riotKey(row.riotId) === want) {
+        const identity = identityFromPlayer(row);
+        if (identity?.country || identity?.team) return remember(identity);
+      }
+    }
+  }
+  const gameName = String(riotId).split('#')[0].trim();
+  const found = await searchPlayers(gameName.length >= 3 ? gameName : riotId).catch(() => []);
+  for (const row of found.slice(0, 6)) {
+    if (riotKey(row.riotId) !== want) continue;
+    if (row.slug) {
+      const full = await getPro(row.slug);
+      if (full.ok && playerHasRiotId(full.player, want)) {
+        return remember(identityFromPlayer(full.player));
+      }
+    }
+    const identity = identityFromPlayer(row);
+    if (identity?.country || identity?.team) return remember(identity);
+  }
+  for (const row of found.slice(0, 3)) {
+    if (!row.slug) continue;
+    const full = await getPro(row.slug);
+    if (full.ok && playerHasRiotId(full.player, want)) {
+      return remember(identityFromPlayer(full.player));
+    }
+  }
+  return { ok: false };
+}
+
 function register(ipcMain) {
   ipcMain.handle('pros:list', (_e, args) => listPros(args || {}));
   ipcMain.handle('pros:player', (_e, name) => getPro(name));
+  ipcMain.handle('pros:lookup', (_e, riotId) => lookupPro(riotId));
 }
 
 module.exports = register;

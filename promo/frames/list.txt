@@ -1,0 +1,15 @@
+file '01-logo.png'
+duration 5.2
+file '02-draft.png'
+duration 4.8
+file '03-spectate.png'
+duration 5.05
+file '04-replays.png'
+duration 7.45
+file '05-dash.png'
+duration 4.1
+file '06-col.png'
+duration 5.4
+file '07-end.png'
+duration 11.5
+file '07-end.png'

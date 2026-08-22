@@ -1,3 +1,4 @@
+const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
@@ -436,6 +437,31 @@ async function getStatus() {
   }
 }
 
+function riotIdsEqual(aName, aTag, bName, bTag) {
+  return String(aName || '').trim().toLowerCase() === String(bName || '').trim().toLowerCase()
+    && String(aTag || '').trim().toLowerCase() === String(bTag || '').trim().toLowerCase();
+}
+
+/** Prove ownership: League client must be open and logged into Name#TAG. */
+async function assertLoggedInAs(gameName, tagLine) {
+  const st = await getStatus();
+  if (!st.connected) {
+    const code = st.reason === 'not-logged-in' ? 'LCU_NOT_LOGGED_IN' : 'LCU_CLIENT_CLOSED';
+    const err = new Error(code);
+    err.code = code;
+    throw err;
+  }
+  const s = st.summoner || {};
+  if (!riotIdsEqual(gameName, tagLine, s.gameName, s.tagLine)) {
+    const loggedInAs = s.gameName && s.tagLine ? `${s.gameName}#${s.tagLine}` : '';
+    const err = new Error(loggedInAs ? `LCU_MISMATCH:${loggedInAs}` : 'LCU_MISMATCH');
+    err.code = 'LCU_MISMATCH';
+    err.loggedInAs = loggedInAs;
+    throw err;
+  }
+  return s;
+}
+
 function lcuSend(creds, method, apiPath, body, timeoutMs = REQ_TIMEOUT) {
   return new Promise((resolve, reject) => {
     const auth = Buffer.from(`riot:${creds.password}`).toString('base64');
@@ -499,6 +525,58 @@ async function lcuGetSoft(creds, apiPath) {
 let champIndex = { at: 0, byId: null };
 let lastDraft = null;
 let ownedCache = { at: 0, ids: [] };
+
+function lastDraftPath() {
+  try {
+    return path.join(app.getPath('userData'), 'last-draft.json');
+  } catch {
+    return '';
+  }
+}
+
+function draftWorthSaving(data) {
+  if (!data) return false;
+  const seats = [...(data.allies || []), ...(data.enemies || [])];
+  if (seats.some((s) => Number(s?.championId || s?.shownId) > 0)) return true;
+  return Array.isArray(data.bans) && data.bans.length > 0;
+}
+
+function writeLastDraft(pack) {
+  const file = lastDraftPath();
+  if (!file) return;
+  try {
+    fs.writeFileSync(file, JSON.stringify(pack));
+  } catch { /* ignore quota / lock */ }
+}
+
+function readLastDraft() {
+  if (lastDraft?.data) return lastDraft;
+  const file = lastDraftPath();
+  if (!file) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (raw?.data && draftWorthSaving(raw.data)) {
+      lastDraft = raw;
+      return lastDraft;
+    }
+  } catch { /* missing or junk */ }
+  return null;
+}
+
+function savedDraftPayload(phase = '', connected = false) {
+  const saved = readLastDraft();
+  if (!saved?.data) return null;
+  return {
+    ...saved.data,
+    connected,
+    inSelect: false,
+    source: 'last-draft',
+    reason: 'last-draft',
+    acting: null,
+    gameflow: phase || saved.data.gameflow || '',
+    savedAt: saved.at,
+  };
+}
 
 async function loadChampIndex() {
   if (champIndex.byId && Date.now() - champIndex.at < 12 * 60 * 60 * 1000) return champIndex.byId;
@@ -650,12 +728,24 @@ function buildDraftPayload(session, byId, extra = {}) {
 }
 
 function rememberDraft(data) {
-  lastDraft = { at: Date.now(), data: { ...data, inSelect: false, source: 'last-draft' } };
+  if (!draftWorthSaving(data)) return;
+  lastDraft = {
+    at: Date.now(),
+    data: {
+      ...data,
+      inSelect: false,
+      source: 'last-draft',
+      acting: null,
+    },
+  };
+  writeLastDraft(lastDraft);
 }
 
 async function getChampSelect() {
   const creds = await getCredentials();
-  if (!creds) return { connected: false, inSelect: false, reason: 'client-closed' };
+  if (!creds) {
+    return savedDraftPayload('', false) || { connected: false, inSelect: false, reason: 'client-closed' };
+  }
 
   let session;
   let phase = '';
@@ -668,14 +758,11 @@ async function getChampSelect() {
     session = select;
   } catch {
     credsCache = { at: 0, creds: null };
-    return { connected: false, inSelect: false, reason: 'client-closed' };
+    return savedDraftPayload('', false) || { connected: false, inSelect: false, reason: 'client-closed' };
   }
 
   if (!session) {
-    if (lastDraft && Date.now() - lastDraft.at < 15 * 60 * 1000) {
-      return { ...lastDraft.data, connected: true, reason: 'last-draft', gameflow: phase };
-    }
-    return { connected: true, inSelect: false, reason: 'idle', gameflow: phase };
+    return savedDraftPayload(phase, true) || { connected: true, inSelect: false, reason: 'idle', gameflow: phase };
   }
 
   const byId = await loadChampIndex().catch(() => ({}));
@@ -1053,6 +1140,7 @@ function register(ipcMain) {
 module.exports = {
   getCollections,
   getStatus,
+  assertLoggedInAs,
   getChampSelect,
   applyRunePage,
   launchSpectate,

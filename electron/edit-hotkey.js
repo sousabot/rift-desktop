@@ -4,12 +4,14 @@ const path = require('path');
 const SCRIPT = path.join(__dirname, 'edit-hotkey.ps1');
 
 let child = null;
-let onHotkey = null;
+let onEdit = null;
+let onScout = null;
 let stopping = false;
 let restartTimer = null;
 
-function start(cb) {
-  onHotkey = cb;
+function start(editCb, scoutCb) {
+  onEdit = editCb;
+  onScout = scoutCb;
   if (process.platform !== 'win32') return;
   stopping = false;
   if (child) return;
@@ -27,8 +29,12 @@ function start(cb) {
     const lines = buf.split(/\r?\n/);
     buf = lines.pop() || '';
     for (const line of lines) {
-      if (String(line).trim() !== 'HOTKEY') continue;
-      try { onHotkey?.(); } catch { /* ignore */ }
+      const tag = String(line).trim();
+      if (tag === 'EDIT_HOTKEY' || tag === 'HOTKEY') {
+        try { onEdit?.(); } catch { /* ignore */ }
+      } else if (tag === 'SCOUT_HOTKEY') {
+        try { onScout?.(); } catch { /* ignore */ }
+      }
     }
   });
   child.stderr.on('data', () => { /* compile noise */ });
@@ -37,7 +43,7 @@ function start(cb) {
     if (stopping) return;
     restartTimer = setTimeout(() => {
       restartTimer = null;
-      start(onHotkey);
+      start(onEdit, onScout);
     }, 800);
   });
 }

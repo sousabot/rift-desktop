@@ -57,27 +57,62 @@ function highFromEntry(entry) {
   const info = entry?.high_rank_info;
   if (!info?.tier) return null;
   return {
-    tier: info.tier,
+    tier: String(info.tier).toUpperCase(),
     division: info.division,
     lp: info.lp,
   };
 }
 
-async function getSeasonPeak({ puuid, platform, flex = false } = {}) {
+function betterPeak(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  const order = ['IRON', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'EMERALD', 'DIAMOND', 'MASTER', 'GRANDMASTER', 'CHALLENGER'];
+  const ai = order.indexOf(String(a.tier || '').toUpperCase());
+  const bi = order.indexOf(String(b.tier || '').toUpperCase());
+  if (bi !== ai) return bi > ai ? b : a;
+  return Number(b.lp) > Number(a.lp) ? b : a;
+}
+
+function peakFromProfile(data, flex = false) {
+  const body = data?.data && !Array.isArray(data.data) ? data.data : data;
+  if (!body || Array.isArray(body)) return null;
+  const want = flex ? 'FLEXRANKED' : 'SOLORANKED';
+  let best = highFromEntry((body.current_season_high_tiers?.rank_entries || []).find((entry) => entry?.game_type === want));
+  if (!flex) {
+    for (const row of body.lp_histories || []) {
+      const info = row?.tier_info;
+      if (!info?.tier) continue;
+      best = betterPeak(best, {
+        tier: String(info.tier).toUpperCase(),
+        division: info.division,
+        lp: info.lp,
+      });
+    }
+  }
+  return best;
+}
+
+async function getSeasonPeak({ puuid, platform, flex = false, riotId } = {}) {
   const id = String(puuid || '').trim();
-  if (!id) return null;
   const region = PLATFORM_TO_OPGG[String(platform || '').toLowerCase()] || 'euw';
   const queue = flex ? 'flex' : 'solo';
-  const cacheKey = `${region}:${id}:${queue}`;
+  const cacheKey = `${region}:${id || riotId || ''}:${queue}`;
   const hit = cache.get(cacheKey);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.data;
 
-  const url = `https://lol-api-summoner.op.gg/api/v3/${region}/summoners/${encodeURIComponent(id)}?hl=en_US`;
-  const json = await httpsGetJson(url);
-  const data = json?.data || json;
-  const want = flex ? 'FLEXRANKED' : 'SOLORANKED';
-  const row = (data?.current_season_high_tiers?.rank_entries || []).find((entry) => entry?.game_type === want);
-  const peak = highFromEntry(row);
+  let json = null;
+  if (id) {
+    json = await httpsGetJson(`https://lol-api-summoner.op.gg/api/v3/${region}/summoners/${encodeURIComponent(id)}?hl=en_US`);
+  } else if (riotId) {
+    const search = await httpsGetJson(
+      `https://lol-api-summoner.op.gg/api/v3/${region}/summoners?riot_id=${encodeURIComponent(riotId)}&hl=en_US`,
+    );
+    const found = Array.isArray(search?.data) ? search.data[0]?.puuid : search?.data?.puuid;
+    if (found) {
+      json = await httpsGetJson(`https://lol-api-summoner.op.gg/api/v3/${region}/summoners/${encodeURIComponent(found)}?hl=en_US`);
+    }
+  }
+  const peak = peakFromProfile(json, flex);
   cache.set(cacheKey, { at: Date.now(), data: peak });
   return peak;
 }

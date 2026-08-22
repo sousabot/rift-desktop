@@ -7,7 +7,7 @@ const bin = path.join(
   '..',
   'node_modules',
   '.bin',
-  process.platform === 'win32' ? 'ow-electron.cmd' : 'ow-electron',
+  process.platform === 'win32' ? 'electron.cmd' : 'electron',
 );
 
 const child = spawn(bin, ['.'], {

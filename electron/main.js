@@ -6,8 +6,14 @@ const overlay = require('./overlay');
 const recorder = require('./recorder');
 const { getLiveSnapshot, getLiveRoster } = require('./live-client');
 const { getVideoMode, ensureBorderless, enableFullscreenOptimizations } = require('./league-config');
+const overlayPanels = require('./overlay-panels');
 
-try { app.overwolf?.disableAnonymousAnalytics?.(); } catch { /* stock Electron */ }
+function broadcastPanelToggles(toggles) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    try { win.webContents.send('overlay:panelToggles', toggles); } catch { /* ignore */ }
+  }
+}
 
 app.commandLine.appendSwitch('enable-features', 'OverlayScrollbar');
 app.setAppUserModelId('com.riftlol.desktop');
@@ -128,21 +134,23 @@ ipcMain.handle('live:snapshot', () => getLiveSnapshot());
 ipcMain.handle('live:roster', () => getLiveRoster());
 ipcMain.handle('overlay:open', async () => {
   if (!overlay.isEnabled()) return { open: false, disabled: true };
-  if (overlay.usingOverwolf()) {
-    overlay.createOverlayWindow(app, { engine: 'overwolf' });
-    return { open: true, video: overlay.getStatus() };
-  }
-  const fso = await enableFullscreenOptimizations().catch((err) => ({ ok: false, reason: err.message }));
-  const borderless = await ensureBorderless().catch((err) => ({ ok: false, reason: err.message }));
-  const video = {
-    ...borderless,
-    fso,
-    applyNow: !!borderless?.applyNow,
-    restartGame: !!fso?.restartGame,
-    engine: 'desktop',
-  };
-  overlay.createOverlayWindow(app, video);
-  return { open: true, video };
+  overlay.createOverlayWindow(app, { engine: 'desktop' });
+  setImmediate(() => {
+    Promise.all([
+      enableFullscreenOptimizations().catch((err) => ({ ok: false, reason: err.message })),
+      ensureBorderless().catch((err) => ({ ok: false, reason: err.message })),
+    ]).then(([fso, borderless]) => {
+      const video = {
+        ...borderless,
+        fso,
+        applyNow: !!borderless?.applyNow,
+        restartGame: !!fso?.restartGame,
+        engine: 'desktop',
+      };
+      overlay.pushVideo(video);
+    });
+  });
+  return { open: true, video: { engine: 'desktop' } };
 });
 ipcMain.handle('overlay:close', () => {
   overlay.closeOverlayWindow();
@@ -160,6 +168,14 @@ ipcMain.on('overlay:ignoreMouse', (_e, ignore) => overlay.setIgnoreMouse(ignore)
 ipcMain.handle('overlay:getEditMode', () => overlay.isEditing());
 ipcMain.handle('overlay:toggleEdit', () => overlay.toggleEditMode());
 ipcMain.on('overlay:startDrag', (e) => overlay.startDrag(e.sender));
+ipcMain.handle('overlay:getLayout', () => overlay.getLayout());
+ipcMain.handle('overlay:setPanelPos', (_e, id, point) => overlay.setPanelPos(id, point));
+ipcMain.handle('overlay:getPanelToggles', () => overlayPanels.load());
+ipcMain.handle('overlay:setPanelToggle', (_e, id, enabled) => {
+  const next = overlayPanels.setPanel(id, enabled);
+  broadcastPanelToggles(next);
+  return next;
+});
 
 app.on('second-instance', () => showMainWindow());
 
@@ -173,6 +189,7 @@ app.whenReady().then(() => {
   require('./spectate').register(ipcMain, { riotFetch: riotIpc.riotFetch });
   registerStatsHandlers(ipcMain);
   registerFeedbackHandlers(ipcMain);
+  require('./premium-ipc')(ipcMain);
   require('./season-peak')(ipcMain);
   require('./ugg-lp')(ipcMain);
   require('./meta-builds')(ipcMain);

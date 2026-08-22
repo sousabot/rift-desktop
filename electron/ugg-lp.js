@@ -80,6 +80,8 @@ function collectLp(json, into) {
     // in tens of LP.
     if (!id || !Number.isFinite(delta) || delta === 0 || Math.abs(delta) > 80) continue;
     if (row?.lpInfo?.placement) continue;
+    if (row?.win === true && delta < 0) continue;
+    if (row?.win === false && delta > 0) continue;
     into[id] = Math.round(delta);
     n += 1;
   }

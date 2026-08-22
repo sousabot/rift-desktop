@@ -1,21 +1,17 @@
 const { BrowserWindow, globalShortcut } = require('electron');
 const desktop = require('./desktop-overlay');
-const ow = require('./ow-overlay');
-const { loadPos, savePos } = require('./overlay-pos');
+const { loadPos } = require('./overlay-pos');
 const editHotkey = require('./edit-hotkey');
 
 const EDIT_ACCEL = 'CommandOrControl+B';
-const ENABLED = false;
+const SCOUT_ACCEL = 'CommandOrControl+Shift+S';
+const ENABLED = true;
 
 let electronApp = null;
 let lastVideo = null;
 let clickThrough = true;
 let editing = false;
 let lastToggleAt = 0;
-
-function usingOverwolf() {
-  return ow.isAvailable();
-}
 
 function emitEdit() {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -25,40 +21,66 @@ function emitEdit() {
 }
 
 function applyInputMode() {
-  const through = clickThrough && !editing;
-  ow.setClickThrough(through);
-  desktop.setClickThrough(through);
+  desktop.setClickThrough(clickThrough && !editing);
+}
+
+function emitScoutToggle() {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    try { win.webContents.send('overlay:scoutToggle'); } catch { /* ignore */ }
+  }
 }
 
 function syncDesktopHotkey() {
-  try { globalShortcut.unregister(EDIT_ACCEL); } catch { /* ignore */ }
-  if (!isOverlayOpen() || ow.isInjected()) return;
+  for (const accel of [EDIT_ACCEL, SCOUT_ACCEL]) {
+    try { globalShortcut.unregister(accel); } catch { /* ignore */ }
+  }
+  if (!isOverlayOpen()) return;
   try {
     globalShortcut.register(EDIT_ACCEL, () => {
       if (isOverlayOpen()) toggleEditMode();
     });
+    globalShortcut.register(SCOUT_ACCEL, () => {
+      if (isOverlayOpen()) emitScoutToggle();
+    });
   } catch (err) {
-    console.warn('[overlay] desktop Ctrl+B failed', err?.message || err);
+    console.warn('[overlay] overlay hotkeys failed', err?.message || err);
   }
 }
 
-function persistPosition() {
-  const pos = ow.isInjected() ? ow.getPosition() : desktop.captureInset();
-  if (!pos) return;
-  const saved = savePos(pos);
-  desktop.setInset(saved);
+function startEditHotkeys() {
+  editHotkey.start(
+    () => {
+      if (isOverlayOpen()) toggleEditMode();
+    },
+    () => {
+      if (isOverlayOpen()) emitScoutToggle();
+    },
+  );
+  syncDesktopHotkey();
 }
 
 function toggleEditMode(force) {
   if (!isOverlayOpen() && force !== false) return editing;
   const now = Date.now();
   if (typeof force !== 'boolean' && now - lastToggleAt < 320) return editing;
+
+  const next = typeof force === 'boolean' ? force : !editing;
+  // Only unlock HUD while League is actually attached — not with client closed.
+  if (next && !desktop.isAttached()) {
+    if (editing) {
+      editing = false;
+      desktop.setEditing(false);
+      applyInputMode();
+      emitEdit();
+    }
+    return editing;
+  }
+
   if (typeof force !== 'boolean') lastToggleAt = now;
-  editing = typeof force === 'boolean' ? force : !editing;
+  editing = next;
   desktop.setEditing(editing);
-  ow.setEditing(editing);
   applyInputMode();
-  if (!editing) persistPosition();
   emitEdit();
   return editing;
 }
@@ -66,43 +88,32 @@ function toggleEditMode(force) {
 function init(app) {
   electronApp = app;
   if (!ENABLED) return;
-  desktop.setInset(loadPos());
-  ow.init(app);
-  ow.onEditHotkey(() => toggleEditMode());
-  ow.onStatus((status) => {
-    if (status.injected && ow.isWanted()) {
-      desktop.closeOverlayWindow();
-    }
+  desktop.setPanels(loadPos());
+  desktop.setAttachListener((attached) => {
+    if (!attached && editing) toggleEditMode(false);
+  });
+  desktop.setWindowReadyListener(() => {
+    startEditHotkeys();
     syncDesktopHotkey();
   });
-}
-
-function startEditHotkeys() {
-  editHotkey.start(() => {
-    if (isOverlayOpen()) toggleEditMode();
-  });
-  syncDesktopHotkey();
 }
 
 function createOverlayWindow(app, video) {
   if (!ENABLED) return { open: false, disabled: true };
   electronApp = app;
   if (video) lastVideo = video;
-  ow.setWanted(true);
-  if (ow.isInjected()) {
-    desktop.closeOverlayWindow();
-    startEditHotkeys();
-    return { open: true, engine: 'overwolf' };
-  }
-  const win = desktop.createOverlayWindow(app, video);
-  startEditHotkeys();
-  return win;
+  desktop.createOverlayWindow(app, video);
+  syncDesktopHotkey();
+  return { wanted: true };
+}
+
+function pushVideo(video) {
+  if (video) lastVideo = video;
+  desktop.sendVideo(video);
 }
 
 function closeOverlayWindow() {
   if (editing) toggleEditMode(false);
-  ow.setWanted(false);
-  ow.closeInGameWindow();
   desktop.closeOverlayWindow();
   editHotkey.stop();
   syncDesktopHotkey();
@@ -110,7 +121,7 @@ function closeOverlayWindow() {
 
 function isOverlayOpen() {
   if (!ENABLED) return false;
-  return ow.isWanted() || desktop.isOverlayOpen() || ow.isOpen();
+  return desktop.isOverlayOpen();
 }
 
 function setClickThrough(next) {
@@ -124,22 +135,24 @@ function getClickThrough() {
 }
 
 function setIgnoreMouse(ignore) {
-  if (editing) {
-    if (ow.isInjected()) ow.setIgnoreMouse(false);
-    else desktop.setIgnoreMouse(false);
-    return;
-  }
-  if (ow.isInjected()) ow.setIgnoreMouse(ignore);
-  else desktop.setIgnoreMouse(ignore);
+  if (editing) return;
+  if (ignore) desktop.setIgnoreMouse(true);
 }
 
-function startDrag(sender) {
-  if (!editing) return;
-  if (ow.isInjected()) ow.startDrag(sender);
+function startDrag() {
+  // Panels drag inside the renderer while unlocked.
+}
+
+function getLayout() {
+  return desktop.getPanels();
+}
+
+function setPanelPos(id, point) {
+  return desktop.setPanel(id, point);
 }
 
 function isAttached() {
-  return ow.isInjected() || desktop.isAttached();
+  return desktop.isAttached();
 }
 
 function getLastVideo() {
@@ -147,8 +160,21 @@ function getLastVideo() {
 }
 
 function getStatus() {
-  if (!ENABLED) return { engine: 'off', ready: false, wanted: false, injected: false, phase: 'disabled' };
-  return ow.getStatus();
+  if (!ENABLED) {
+    return { engine: 'off', ready: false, wanted: false, attached: false, phase: 'disabled' };
+  }
+  const wanted = desktop.isOverlayOpen();
+  const attached = desktop.isAttached();
+  const surface = desktop.hasOverlaySurface?.() || false;
+  return {
+    engine: 'desktop',
+    ready: true,
+    wanted,
+    attached,
+    injected: false,
+    phase: !wanted ? 'idle' : (attached && surface ? 'attached' : 'waiting'),
+    video: lastVideo || null,
+  };
 }
 
 function isEditing() {
@@ -157,21 +183,25 @@ function isEditing() {
 
 function unregisterHotkeys() {
   editHotkey.stop();
-  try { globalShortcut.unregister(EDIT_ACCEL); } catch { /* ignore */ }
+  for (const accel of [EDIT_ACCEL, SCOUT_ACCEL]) {
+    try { globalShortcut.unregister(accel); } catch { /* ignore */ }
+  }
 }
 
 module.exports = {
   ENABLED,
   isEnabled: () => ENABLED,
   init,
-  usingOverwolf,
   createOverlayWindow,
   closeOverlayWindow,
+  pushVideo,
   isOverlayOpen,
   setClickThrough,
   getClickThrough,
   setIgnoreMouse,
   startDrag,
+  getLayout,
+  setPanelPos,
   toggleEditMode,
   isEditing,
   isAttached,

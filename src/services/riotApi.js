@@ -4,7 +4,7 @@ import { gdScoreFromParticipant } from '../lib/gdScore';
 import { roleFromChampions } from '../lib/champLane';
 import { estimateRankMmr, resolveEstimatedMmr } from '../lib/rankMmr';
 import { loadOpggRankContext } from '../lib/seasonPeak';
-import { attachEstimatedLp, applyTrackedLp, syncMatchLp } from '../lib/lpHistory';
+import { applyTrackedLp, syncMatchLp } from '../lib/lpHistory';
 
 const hasBridge = typeof window !== 'undefined' && !!window.riotAPI;
 
@@ -43,17 +43,42 @@ function getChampionMeta() {
 const ROLE_LABELS = { TOP: 'Top', JUNGLE: 'Jungle', MIDDLE: 'Mid', BOTTOM: 'ADC', UTILITY: 'Support' };
 
 const dashboardInflight = new Map();
+const dashboardCache = new Map();
+const DASHBOARD_CACHE_MS = 2 * 60 * 1000;
+
+function dashboardKey({ gameName, tagLine, region, platform, queue, count }) {
+  const matchCount = Math.min(Math.max(Number(count) || 20, 1), 100);
+  return [gameName, tagLine, region, platform, queue || '', matchCount].join('|').toLowerCase();
+}
+
+export function peekSummonerDashboard(args = {}) {
+  const key = dashboardKey({
+    gameName: args.gameName,
+    tagLine: args.tagLine,
+    region: args.region || 'europe',
+    platform: args.platform || 'euw1',
+    queue: args.queue,
+    count: args.count,
+  });
+  return dashboardCache.get(key)?.data || null;
+}
 
 export async function getSummonerDashboard({ gameName, tagLine, region = 'europe', platform = 'euw1', queue = 420, count = 20 }) {
   requireBridge();
 
   const matchCount = Math.min(Math.max(Number(count) || 20, 1), 100);
-  const key = [gameName, tagLine, region, platform, queue || '', matchCount].join('|').toLowerCase();
+  const key = dashboardKey({ gameName, tagLine, region, platform, queue, count: matchCount });
+  const cached = dashboardCache.get(key);
+  if (cached && Date.now() - cached.at < DASHBOARD_CACHE_MS) return cached.data;
+
   const existing = dashboardInflight.get(key);
   if (existing) return existing;
 
   const pending = loadSummonerDashboard({ gameName, tagLine, region, platform, queue, matchCount });
   dashboardInflight.set(key, pending);
+  pending.then((data) => {
+    dashboardCache.set(key, { at: Date.now(), data });
+  }).catch(() => { /* keep last good cache */ });
   pending.finally(() => {
     if (dashboardInflight.get(key) === pending) dashboardInflight.delete(key);
   });
@@ -87,7 +112,7 @@ async function loadSummonerDashboard({ gameName, tagLine, region, platform, queu
       count: matchCount,
       queue: queue || undefined,
     });
-    const timelineIds = (matchIds || []).slice(0, 10);
+    const timelineIds = matchIds || [];
     const rankContextPromise = loadOpggRankContext({
       puuid: account.puuid,
       platform: resolvedPlatform,
@@ -355,10 +380,10 @@ function streakFromResults(results) {
   return first ? n : -n;
 }
 
-async function liveMatchExtras(puuids, championIdByPuuid, region, queue = 420) {
+async function liveMatchExtras(puuids, championIdByPuuid, region, queue = 420, count = 5) {
   if (!window.riotAPI.getLastMatchIdsBulk) return {};
   const lists = await window.riotAPI.getLastMatchIdsBulk({
-    puuids, region, queue, count: 10,
+    puuids, region, queue, count,
   }).catch(() => []);
   const unique = [...new Set((lists || []).flat().filter(Boolean))];
   const matches = unique.length
@@ -391,6 +416,8 @@ async function liveMatchExtras(puuids, championIdByPuuid, region, queue = 420) {
       champWins,
       champWr: champGames ? (champWins / champGames) * 100 : null,
       role: topRole ? ROLE_LABELS[topRole[0]] : null,
+      recentMainRole: topRole ? ROLE_LABELS[topRole[0]] : null,
+      recentGames: results.length,
       streak: streakFromResults(results),
       last3: results.slice(0, 3),
       dodge: streakFromResults(results) <= -3,
@@ -459,6 +486,8 @@ function mapLivePlayers(raw, account, champMeta, accountByPuuid = {}, rankedByPu
       streak: extra.streak || 0,
       last3: extra.last3 || [],
       dodge: !!extra.dodge,
+      recentMainRole: extra.recentMainRole || null,
+      recentGames: extra.recentGames || 0,
       ...ranked,
     };
   });
@@ -588,23 +617,69 @@ function withTimeout(promise, ms, fallback) {
   ]);
 }
 
-export async function getLiveGame({ gameName, tagLine, region = 'europe', platform = 'euw1' }) {
+let liveGameCache = null;
+let liveGameCacheKey = '';
+let liveGameCacheAt = 0;
+const LIVE_GAME_CACHE_MS = 15000;
+
+function liveGameParamsKey(params) {
+  return `${params.gameName || ''}#${params.tagLine || ''}:${params.platform || ''}:${params.region || ''}`;
+}
+
+function packSpectatorLiveGame(raw, players, account, champMeta, resolvedPlatform) {
+  return {
+    gameId: raw.gameId,
+    platformId: String(raw.platformId || resolvedPlatform || '').toUpperCase(),
+    platform: resolvedPlatform,
+    puuid: account.puuid,
+    encryptionKey: raw.observers?.encryptionKey || '',
+    queueId: raw.gameQueueConfigId,
+    queueName: QUEUE_NAMES[raw.gameQueueConfigId] || 'Custom',
+    gameLength: raw.gameLength || 0,
+    gameStartTime: raw.gameStartTime || 0,
+    source: 'spectator',
+    bans: (raw.bannedChampions || []).map((b) => ({
+      teamId: b.teamId,
+      pickTurn: b.pickTurn,
+      championId: b.championId,
+      champion: Number(b.championId) > 0
+        ? (champMeta.map[String(b.championId)] || null)
+        : null,
+    })),
+    blue: players.filter((p) => p.teamId === 100),
+    red: players.filter((p) => p.teamId === 200),
+  };
+}
+
+export async function getLiveGame(
+  { gameName, tagLine, region = 'europe', platform = 'euw1' },
+  hooks = {},
+) {
   if (!hasBridge) return null;
+  const { onPartial, skipCache = false } = hooks;
+  const cacheKey = liveGameParamsKey({ gameName, tagLine, region, platform });
+  const cacheFresh = liveGameCache
+    && liveGameCacheKey === cacheKey
+    && Date.now() - liveGameCacheAt < LIVE_GAME_CACHE_MS;
+  if (cacheFresh && !skipCache) {
+    onPartial?.(liveGameCache);
+    return liveGameCache;
+  }
+
   try {
     const account = await window.riotAPI.getAccountByRiotId({ gameName, tagLine, region });
     let resolvedPlatform = platform;
     let resolvedRegion = region;
-    if (window.riotAPI.getLeagueShard) {
-      try {
-        const shard = await window.riotAPI.getLeagueShard({
-          puuid: account.puuid,
-          region,
-          platform,
-        });
-        if (shard?.platform) resolvedPlatform = shard.platform;
-        if (shard?.region) resolvedRegion = shard.region;
-      } catch { /* keep selected server */ }
-    }
+    const shardPromise = window.riotAPI.getLeagueShard
+      ? window.riotAPI.getLeagueShard({ puuid: account.puuid, region, platform }).catch(() => null)
+      : Promise.resolve(null);
+    const champMetaPromise = getChampionMeta();
+    const rosterPromise = getLiveRosterSafe();
+
+    const shard = await shardPromise;
+    if (shard?.platform) resolvedPlatform = shard.platform;
+    if (shard?.region) resolvedRegion = shard.region;
+
     let raw;
     try {
       raw = await window.riotAPI.getActiveGame({ puuid: account.puuid, platform: resolvedPlatform });
@@ -613,19 +688,32 @@ export async function getLiveGame({ gameName, tagLine, region = 'europe', platfo
         noticeFromError(err);
         return null;
       }
-      const champMeta = await getChampionMeta();
-      const roster = await getLiveRosterSafe();
+      const [champMeta, roster] = await Promise.all([champMetaPromise, rosterPromise]);
       if (rosterIncludes(roster, account)) {
-        return liveGameFromRoster(roster, account, champMeta);
+        const fromRoster = liveGameFromRoster(roster, account, champMeta);
+        if (fromRoster) {
+          liveGameCache = fromRoster;
+          liveGameCacheKey = cacheKey;
+          liveGameCacheAt = Date.now();
+          onPartial?.(fromRoster);
+        }
+        return fromRoster;
       }
       return null;
     }
     if (!raw?.participants?.length) return null;
 
-    const champMeta = await getChampionMeta();
+    const [champMeta, roster] = await Promise.all([champMetaPromise, rosterPromise]);
     const puuids = raw.participants.map((p) => p.puuid).filter(Boolean);
 
-    const [rankedLists, accounts, roster] = await Promise.all([
+    const partialPlayers = mergeLiveRoster(
+      mapLivePlayers(raw, account, champMeta, {}, {}, {}),
+      roster,
+    );
+    const shell = packSpectatorLiveGame(raw, partialPlayers, account, champMeta, resolvedPlatform);
+    onPartial?.(shell);
+
+    const [rankedLists, accounts] = await Promise.all([
       window.riotAPI.getRankedByPuuidsBulk
         ? window.riotAPI.getRankedByPuuidsBulk({ puuids, platform: resolvedPlatform }).catch(() => puuids.map(() => null))
         : Promise.all(puuids.map((puuid) =>
@@ -634,10 +722,9 @@ export async function getLiveGame({ gameName, tagLine, region = 'europe', platfo
       window.riotAPI.getAccountsByPuuidsBulk
         ? window.riotAPI.getAccountsByPuuidsBulk({ puuids, region: resolvedRegion }).catch(() => [])
         : Promise.resolve([]),
-      getLiveRosterSafe(),
     ]);
 
-    const players = mergeLiveRoster(
+    const rankedPlayers = mergeLiveRoster(
       mapLivePlayers(
         raw,
         account,
@@ -648,29 +735,38 @@ export async function getLiveGame({ gameName, tagLine, region = 'europe', platfo
       ),
       roster,
     );
+    const withRank = packSpectatorLiveGame(raw, rankedPlayers, account, champMeta, resolvedPlatform);
+    onPartial?.(withRank);
 
-    return {
-      gameId: raw.gameId,
-      platformId: String(raw.platformId || resolvedPlatform || '').toUpperCase(),
-      platform: resolvedPlatform,
-      puuid: account.puuid,
-      encryptionKey: raw.observers?.encryptionKey || '',
-      queueId: raw.gameQueueConfigId,
-      queueName: QUEUE_NAMES[raw.gameQueueConfigId] || 'Custom',
-      gameLength: raw.gameLength || 0,
-      gameStartTime: raw.gameStartTime || 0,
-      source: 'spectator',
-      bans: (raw.bannedChampions || []).map((b) => ({
-        teamId: b.teamId,
-        pickTurn: b.pickTurn,
-        championId: b.championId,
-        champion: Number(b.championId) > 0
-          ? (champMeta.map[String(b.championId)] || null)
-          : null,
-      })),
-      blue: players.filter((p) => p.teamId === 100),
-      red: players.filter((p) => p.teamId === 200),
-    };
+    const champIdByPuuid = {};
+    raw.participants.forEach((p) => {
+      if (p.puuid) champIdByPuuid[p.puuid] = p.championId;
+    });
+    const extras = await liveMatchExtras(
+      puuids,
+      champIdByPuuid,
+      resolvedRegion,
+      raw.gameQueueConfigId || 420,
+      5,
+    ).catch(() => ({}));
+
+    const players = mergeLiveRoster(
+      mapLivePlayers(
+        raw,
+        account,
+        champMeta,
+        indexByPuuid(puuids, accounts),
+        indexByPuuid(puuids, rankedLists),
+        extras,
+      ),
+      roster,
+    );
+
+    const full = packSpectatorLiveGame(raw, players, account, champMeta, resolvedPlatform);
+    liveGameCache = full;
+    liveGameCacheKey = cacheKey;
+    liveGameCacheAt = Date.now();
+    return full;
   } catch (err) {
     console.warn('[riotApi] Live game failed:', err.message);
     if (isNotFound(err)) throw err;
@@ -977,38 +1073,110 @@ function itemPurchases(timeline, participantId) {
 // Gold Diff @15 and K+A Diff @15 are computed against the opposing player in the
 // same role (teamPosition), using the match timeline (match-v5 has no @15 snapshot).
 function computeAt15(timeline, match, self) {
-  if (!timeline?.info?.frames?.length || !self.teamPosition) {
-    return { goldDiff15: null, kaDiff15: null };
-  }
+  const empty = {
+    goldDiff15: null,
+    kaDiff15: null,
+    cs15: null,
+    csDiff15: null,
+    xpDiff15: null,
+    dmg15: null,
+    taken15: null,
+    kills15: null,
+    deaths15: null,
+    plates15: null,
+    roamKills15: null,
+    roamAssists15: null,
+  };
+  if (!timeline?.info?.frames?.length) return empty;
 
+  const lanePos = (participant) => {
+    const pos = participant?.teamPosition || participant?.individualPosition || '';
+    return pos && pos !== 'INVALID' ? pos : '';
+  };
+  const selfPos = lanePos(self);
   const selfId = self.participantId;
-  const opp = match.info.participants.find(
-    (pp) => pp.teamId !== self.teamId && pp.teamPosition === self.teamPosition
+  const byId = Object.fromEntries(
+    (match?.info?.participants || []).map((pp) => [pp.participantId, pp]),
   );
-  if (!opp) return { goldDiff15: null, kaDiff15: null };
-  const oppId = opp.participantId;
+  const opp = selfPos
+    ? match.info.participants.find(
+      (pp) => pp.teamId !== self.teamId && lanePos(pp) === selfPos,
+    )
+    : null;
+  const oppId = opp?.participantId;
 
   const frames = timeline.info.frames;
   const frameAt15 = frames.filter((f) => f.timestamp <= FIFTEEN_MIN_MS).pop();
-  if (!frameAt15) return { goldDiff15: null, kaDiff15: null };
+  if (!frameAt15) return empty;
 
   const selfFrame = frameAt15.participantFrames[String(selfId)];
-  const oppFrame  = frameAt15.participantFrames[String(oppId)];
+  const oppFrame = oppId != null ? frameAt15.participantFrames[String(oppId)] : null;
   const goldDiff15 = selfFrame && oppFrame ? selfFrame.totalGold - oppFrame.totalGold : null;
+  const xpDiff15 = selfFrame && oppFrame
+    ? (selfFrame.xp || 0) - (oppFrame.xp || 0)
+    : null;
+  const cs15 = selfFrame
+    ? (selfFrame.minionsKilled || 0) + (selfFrame.jungleMinionsKilled || 0)
+    : null;
+  const csDiff15 = selfFrame && oppFrame
+    ? ((selfFrame.minionsKilled || 0) + (selfFrame.jungleMinionsKilled || 0))
+      - ((oppFrame.minionsKilled || 0) + (oppFrame.jungleMinionsKilled || 0))
+    : null;
+  const dmg15 = selfFrame?.damageStats?.totalDamageDoneToChampions;
+  const taken15 = selfFrame?.damageStats?.totalDamageTaken;
 
-  let selfKA = 0, oppKA = 0;
+  let selfKA = 0;
+  let oppKA = 0;
+  let kills15 = 0;
+  let deaths15 = 0;
+  let plates15 = 0;
+  let roamKills15 = 0;
+  let roamAssists15 = 0;
   for (const f of frames) {
     if (f.timestamp > FIFTEEN_MIN_MS) break;
     for (const ev of f.events || []) {
-      if (ev.type !== 'CHAMPION_KILL' || ev.timestamp > FIFTEEN_MIN_MS) continue;
-      if (ev.killerId === selfId) selfKA++;
-      if ((ev.assistingParticipantIds || []).includes(selfId)) selfKA++;
-      if (ev.killerId === oppId) oppKA++;
-      if ((ev.assistingParticipantIds || []).includes(oppId)) oppKA++;
+      if (ev.timestamp > FIFTEEN_MIN_MS) continue;
+      if (ev.type === 'TURRET_PLATE_DESTROYED' && ev.killerId === selfId) {
+        plates15 += 1;
+      }
+      if (ev.type !== 'CHAMPION_KILL') continue;
+      if (ev.killerId === selfId) {
+        kills15 += 1;
+        selfKA += 1;
+        const victim = byId[ev.victimId];
+        if (selfPos && victim && lanePos(victim) && lanePos(victim) !== selfPos) {
+          roamKills15 += 1;
+        }
+      }
+      if ((ev.assistingParticipantIds || []).includes(selfId)) {
+        selfKA += 1;
+        const victim = byId[ev.victimId];
+        if (selfPos && victim && lanePos(victim) && lanePos(victim) !== selfPos) {
+          roamAssists15 += 1;
+        }
+      }
+      if (ev.victimId === selfId) deaths15 += 1;
+      if (oppId != null) {
+        if (ev.killerId === oppId) oppKA += 1;
+        if ((ev.assistingParticipantIds || []).includes(oppId)) oppKA += 1;
+      }
     }
   }
 
-  return { goldDiff15, kaDiff15: selfKA - oppKA };
+  return {
+    goldDiff15,
+    kaDiff15: oppId != null ? selfKA - oppKA : null,
+    cs15,
+    csDiff15,
+    xpDiff15,
+    dmg15: dmg15 != null && Number.isFinite(Number(dmg15)) ? Number(dmg15) : null,
+    taken15: taken15 != null && Number.isFinite(Number(taken15)) ? Number(taken15) : null,
+    kills15,
+    deaths15,
+    plates15,
+    roamKills15,
+    roamAssists15,
+  };
 }
 
 // Riot doesn't expose an early/mid/late "phase score" — this is a heuristic we
@@ -1025,6 +1193,278 @@ function goldDiffAtTimestamp(timeline, selfId, oppId, ts) {
   const selfFrame = frame.participantFrames[String(selfId)];
   const oppFrame  = frame.participantFrames[String(oppId)];
   return selfFrame && oppFrame ? selfFrame.totalGold - oppFrame.totalGold : null;
+}
+
+function champDamageAtTimestamp(timeline, participantId, ts) {
+  if (!timeline?.info?.frames?.length) return null;
+  const frame = timeline.info.frames.filter((f) => f.timestamp <= ts).pop();
+  if (!frame) return null;
+  const pf = frame.participantFrames[String(participantId)];
+  const dmg = pf?.damageStats?.totalDamageDoneToChampions;
+  return dmg != null && Number.isFinite(Number(dmg)) ? Number(dmg) : null;
+}
+
+function computePhaseDpm(timeline, match, self) {
+  const empty = { dpmEarly: null, dpmMid: null, dpmLate: null };
+  if (!timeline?.info?.frames?.length) return empty;
+
+  const selfId = self.participantId;
+  const frames = timeline.info.frames;
+  const lastTs = frames[frames.length - 1]?.timestamp || 0;
+  const durationMs = Math.max(
+    Number(match.info.gameDuration) * 1000 || 0,
+    lastTs,
+  );
+  if (durationMs <= 0) return empty;
+
+  const dmgEnd = champDamageAtTimestamp(timeline, selfId, durationMs)
+    ?? (Number(self.totalDamageDealtToChampions) || null);
+  const dmg15 = champDamageAtTimestamp(timeline, selfId, PHASE_BOUNDARIES.early);
+  const dmg25 = champDamageAtTimestamp(timeline, selfId, PHASE_BOUNDARIES.mid);
+
+  const earlyMin = Math.min(PHASE_BOUNDARIES.early / 60000, durationMs / 60000);
+  const dpmEarly = dmg15 != null && earlyMin > 0 ? dmg15 / earlyMin : null;
+
+  let dpmMid = null;
+  if (dmg15 != null && dmg25 != null && durationMs > PHASE_BOUNDARIES.early) {
+    const midEnd = Math.min(durationMs, PHASE_BOUNDARIES.mid);
+    const midMin = (midEnd - PHASE_BOUNDARIES.early) / 60000;
+    if (midMin > 0) dpmMid = (dmg25 - dmg15) / midMin;
+  }
+
+  let dpmLate = null;
+  if (dmg25 != null && dmgEnd != null && durationMs > PHASE_BOUNDARIES.mid) {
+    const lateMin = (durationMs - PHASE_BOUNDARIES.mid) / 60000;
+    if (lateMin > 0) dpmLate = (dmgEnd - dmg25) / lateMin;
+  }
+
+  return { dpmEarly, dpmMid, dpmLate };
+}
+
+function teamObjectives(match, teamId) {
+  return (match?.info?.teams || []).find((team) => team.teamId === teamId)?.objectives || null;
+}
+
+function computeDeathTiming(timeline, participantId) {
+  const empty = {
+    deathsBefore15: null,
+    deathsBefore25: null,
+    firstDeathSec: null,
+    avgDeathSec: null,
+  };
+  if (!timeline?.info?.frames?.length) return empty;
+  const T15 = 15 * 60 * 1000;
+  const T25 = 25 * 60 * 1000;
+  const times = [];
+  let deathsBefore15 = 0;
+  let deathsBefore25 = 0;
+  for (const frame of timeline.info.frames) {
+    for (const ev of frame.events || []) {
+      if (ev.type !== 'CHAMPION_KILL' || ev.victimId !== participantId) continue;
+      const ts = Number(ev.timestamp) || 0;
+      times.push(ts / 1000);
+      if (ts <= T15) deathsBefore15 += 1;
+      if (ts <= T25) deathsBefore25 += 1;
+    }
+  }
+  return {
+    deathsBefore15,
+    deathsBefore25,
+    firstDeathSec: times.length ? times[0] : null,
+    avgDeathSec: times.length ? times.reduce((a, b) => a + b, 0) / times.length : null,
+  };
+}
+
+function computeVisionTiming(timeline, participantId) {
+  const empty = {
+    wardsPlaced15: null,
+    wardsKilled15: null,
+    controlPlaced15: null,
+    wardsPlaced20: null,
+    wardsKilled20: null,
+    controlPlaced20: null,
+  };
+  if (!timeline?.info?.frames?.length) return empty;
+  const T15 = 15 * 60 * 1000;
+  const T20 = 20 * 60 * 1000;
+  let wardsPlaced15 = 0;
+  let wardsKilled15 = 0;
+  let controlPlaced15 = 0;
+  let wardsPlaced20 = 0;
+  let wardsKilled20 = 0;
+  let controlPlaced20 = 0;
+  for (const frame of timeline.info.frames) {
+    for (const ev of frame.events || []) {
+      const ts = Number(ev.timestamp) || 0;
+      if (ev.type === 'WARD_PLACED' && ev.creatorId === participantId) {
+        const isControl = String(ev.wardType || '').toUpperCase().includes('CONTROL');
+        if (ts <= T15) {
+          wardsPlaced15 += 1;
+          if (isControl) controlPlaced15 += 1;
+        }
+        if (ts <= T20) {
+          wardsPlaced20 += 1;
+          if (isControl) controlPlaced20 += 1;
+        }
+      }
+      if (ev.type === 'WARD_KILL' && ev.killerId === participantId) {
+        if (ts <= T15) wardsKilled15 += 1;
+        if (ts <= T20) wardsKilled20 += 1;
+      }
+    }
+  }
+  return {
+    wardsPlaced15,
+    wardsKilled15,
+    controlPlaced15,
+    wardsPlaced20,
+    wardsKilled20,
+    controlPlaced20,
+  };
+}
+
+function computeObjectiveTakes(timeline, participantId) {
+  const empty = {
+    dragonTakes: null,
+    baronTakes: null,
+    heraldTakes: null,
+    grubTakes: null,
+    atakhanTakes: null,
+    epicTakes: null,
+  };
+  if (!timeline?.info?.frames?.length) return empty;
+  let dragon = 0;
+  let baron = 0;
+  let herald = 0;
+  let grub = 0;
+  let atakhan = 0;
+  for (const frame of timeline.info.frames) {
+    for (const ev of frame.events || []) {
+      if (ev.type !== 'ELITE_MONSTER_KILL') continue;
+      const involved = ev.killerId === participantId
+        || (ev.assistingParticipantIds || []).includes(participantId);
+      if (!involved) continue;
+      const mt = String(ev.monsterType || '').toUpperCase();
+      const sub = String(ev.monsterSubType || '').toUpperCase();
+      const label = `${mt} ${sub}`;
+      if (label.includes('BARON')) baron += 1;
+      else if (label.includes('ATAKHAN')) atakhan += 1;
+      else if (label.includes('HERALD') || label.includes('RIFT')) herald += 1;
+      else if (label.includes('HORDE') || label.includes('GRUB')) grub += 1;
+      else if (label.includes('DRAGON')) dragon += 1;
+    }
+  }
+  return {
+    dragonTakes: dragon,
+    baronTakes: baron,
+    heraldTakes: herald,
+    grubTakes: grub,
+    atakhanTakes: atakhan,
+    epicTakes: dragon + baron + herald + grub + atakhan,
+  };
+}
+
+function lanePosition(participant) {
+  const pos = participant?.teamPosition || participant?.individualPosition || '';
+  return pos && pos !== 'INVALID' ? pos : '';
+}
+
+function computeSoloDuels(timeline, match, self) {
+  const empty = {
+    soloKills: null,
+    soloDeaths: null,
+    laneSoloKills: null,
+    laneSoloDeaths: null,
+  };
+  if (!timeline?.info?.frames?.length) return empty;
+  const selfId = self.participantId;
+  const selfPos = lanePosition(self);
+  const byId = Object.fromEntries(
+    (match?.info?.participants || []).map((pp) => [pp.participantId, pp]),
+  );
+  let soloKills = 0;
+  let soloDeaths = 0;
+  let laneSoloKills = 0;
+  let laneSoloDeaths = 0;
+  for (const frame of timeline.info.frames) {
+    for (const ev of frame.events || []) {
+      if (ev.type !== 'CHAMPION_KILL') continue;
+      const assists = ev.assistingParticipantIds || [];
+      if (assists.length) continue;
+      if (!ev.killerId || !ev.victimId) continue;
+      const killer = byId[ev.killerId];
+      const victim = byId[ev.victimId];
+      if (!killer || !victim || killer.teamId === victim.teamId) continue;
+      const sameLane = selfPos
+        && lanePosition(killer) === selfPos
+        && lanePosition(victim) === selfPos;
+      if (ev.killerId === selfId) {
+        soloKills += 1;
+        if (sameLane) laneSoloKills += 1;
+      }
+      if (ev.victimId === selfId) {
+        soloDeaths += 1;
+        if (sameLane) laneSoloDeaths += 1;
+      }
+    }
+  }
+  return { soloKills, soloDeaths, laneSoloKills, laneSoloDeaths };
+}
+
+/** Classify kills by unique participants on the event: skirmish 3–5, teamfight 6+. */
+function computeFightBuckets(timeline, self) {
+  const empty = {
+    skirmishKills: null,
+    skirmishDeaths: null,
+    skirmishAssists: null,
+    teamfightKills: null,
+    teamfightDeaths: null,
+    teamfightAssists: null,
+  };
+  if (!timeline?.info?.frames?.length) return empty;
+  const selfId = self.participantId;
+  let skirmishKills = 0;
+  let skirmishDeaths = 0;
+  let skirmishAssists = 0;
+  let teamfightKills = 0;
+  let teamfightDeaths = 0;
+  let teamfightAssists = 0;
+  for (const frame of timeline.info.frames) {
+    for (const ev of frame.events || []) {
+      if (ev.type !== 'CHAMPION_KILL') continue;
+      if (!ev.killerId || !ev.victimId) continue;
+      const assists = ev.assistingParticipantIds || [];
+      const ids = new Set([ev.killerId, ev.victimId, ...assists].filter(Boolean));
+      const size = ids.size;
+      if (size < 3) continue;
+      const bucket = size >= 6 ? 'tf' : 'sk';
+      if (ev.killerId === selfId) {
+        if (bucket === 'tf') teamfightKills += 1;
+        else skirmishKills += 1;
+      }
+      if (ev.victimId === selfId) {
+        if (bucket === 'tf') teamfightDeaths += 1;
+        else skirmishDeaths += 1;
+      }
+      if (assists.includes(selfId)) {
+        if (bucket === 'tf') teamfightAssists += 1;
+        else skirmishAssists += 1;
+      }
+    }
+  }
+  return {
+    skirmishKills,
+    skirmishDeaths,
+    skirmishAssists,
+    teamfightKills,
+    teamfightDeaths,
+    teamfightAssists,
+  };
+}
+
+function challengeNum(challenges, key) {
+  const v = Number(challenges?.[key]);
+  return Number.isFinite(v) ? v : null;
 }
 
 function computePhaseScores(timeline, match, self) {
@@ -1133,8 +1573,24 @@ async function normalizeDashboard({
     const teamKills = m.info.participants
       .filter((pp) => pp.teamId === p.teamId)
       .reduce((sum, pp) => sum + pp.kills, 0);
-    const { goldDiff15, kaDiff15 } = computeAt15(timelines[idx], m, p);
+    const { goldDiff15, kaDiff15, cs15, csDiff15, xpDiff15, dmg15, taken15, kills15, deaths15, plates15, roamKills15, roamAssists15 } = computeAt15(timelines[idx], m, p);
     const phases = computePhaseScores(timelines[idx], m, p);
+    const phaseDpm = computePhaseDpm(timelines[idx], m, p);
+    const objTakes = computeObjectiveTakes(timelines[idx], p.participantId);
+    const visionTiming = computeVisionTiming(timelines[idx], p.participantId);
+    const deathTiming = computeDeathTiming(timelines[idx], p.participantId);
+    const duels = computeSoloDuels(timelines[idx], m, p);
+    const fights = computeFightBuckets(timelines[idx], p);
+    const teamObj = teamObjectives(m, p.teamId);
+    const challengeSolo = Number(p.challenges?.soloKills);
+    const soloKills = duels.soloKills != null
+      ? duels.soloKills
+      : (Number.isFinite(challengeSolo) ? challengeSolo : null);
+    const quickSoloKills = Number(p.challenges?.quickSoloKills);
+    const soloDeaths = duels.soloDeaths;
+    const ch = p.challenges || {};
+    const largestMultiKill = Number(p.largestMultiKill);
+    const largestKillingSpree = Number(p.largestKillingSpree);
     const allyTeam = [
       p.championName,
       ...m.info.participants
@@ -1149,11 +1605,16 @@ async function normalizeDashboard({
     const primaryPerks = (primary?.selections || []).map((s) => s.perk);
     const subPerks = (sub?.selections || []).map((s) => s.perk);
 
-    const teamDamage = m.info.participants
-      .filter((pp) => pp.teamId === p.teamId)
-      .reduce((sum, pp) => sum + (pp.totalDamageDealtToChampions || 0), 0);
+    const allies = m.info.participants.filter((pp) => pp.teamId === p.teamId);
+    const teamDamage = allies.reduce((sum, pp) => sum + (pp.totalDamageDealtToChampions || 0), 0);
+    const teamGold = allies.reduce((sum, pp) => sum + (pp.goldEarned || 0), 0);
+    const teamVision = allies.reduce((sum, pp) => sum + (pp.visionScore || 0), 0);
+    const teamObjDmg = allies.reduce((sum, pp) => sum + (pp.damageDealtToObjectives || 0), 0);
     const damage = p.totalDamageDealtToChampions || 0;
     const damageShare = teamDamage ? damage / teamDamage : null;
+    const goldShare = teamGold ? (p.goldEarned || 0) / teamGold : null;
+    const visionShare = teamVision ? (p.visionScore || 0) / teamVision : null;
+    const objDamageShare = teamObjDmg ? (p.damageDealtToObjectives || 0) / teamObjDmg : null;
     const purchases = itemPurchases(timelines[idx], p.participantId);
     const gdScore = gdScoreFromParticipant(p, m);
     const players = (m.info.participants || []).map((pp) => {
@@ -1177,7 +1638,41 @@ async function normalizeDashboard({
     return {
       matchId:      m.metadata.matchId,
       win:          p.win,
+      teamId:       p.teamId,
+      gameDuration: Number(m.info.gameDuration) || 0,
+      surrender:    !!(p.gameEndedInSurrender || p.gameEndedInEarlySurrender),
+      tripleKills:  p.tripleKills || 0,
+      quadraKills:  p.quadraKills || 0,
+      pentaKills:   p.pentaKills || 0,
+      firstBlood:   !!p.firstBloodKill,
+      damageTaken:  p.totalDamageTaken || 0,
+      takenPerMin:  (p.totalDamageTaken || 0) / mins,
+      mitigatedTotal: Number(p.damageSelfMitigated) || 0,
+      mitigatedPerMin: (p.damageSelfMitigated || 0) / mins,
+      healTotal: Number(p.totalHeal) || 0,
+      healPerMin:   (p.totalHeal || 0) / mins,
+      allyHealPerMin: (p.totalHealsOnTeammates || 0) / mins,
+      longestLife:  Number(p.longestTimeSpentLiving) || 0,
+      timeCCing:    Number(p.timeCCingOthers) || 0,
+      timeCcDealt:  Number(p.totalTimeCCDealt) || 0,
+      timeDead:     Number(p.totalTimeSpentDead) || 0,
+      deathsPerMin: (Number(p.deaths) || 0) / mins,
+      deathsBefore15: deathTiming.deathsBefore15,
+      deathsBefore25: deathTiming.deathsBefore25,
+      firstDeathSec: deathTiming.firstDeathSec,
+      avgDeathSec: deathTiming.avgDeathSec,
+      damageTakenShare: challengeNum(ch, 'damageTakenOnTeamPercentage'),
+      deathsByEnemyChamps: challengeNum(ch, 'deathsByEnemyChamps'),
+      survivedSingleDigitHp: challengeNum(ch, 'survivedSingleDigitHpCount'),
+      tookLargeDamageSurvived: challengeNum(ch, 'tookLargeDamageSurvived'),
+      effectiveHealShield: challengeNum(ch, 'effectiveHealAndShielding'),
+      saveAllyFromDeath: challengeNum(ch, 'saveAllyFromDeath'),
+      enemyImmobilizations: challengeNum(ch, 'enemyChampionImmobilizations'),
+      immobilizeAndKill: challengeNum(ch, 'immobilizeAndKillWithAlly'),
+      survivedThreeImmobilizes: challengeNum(ch, 'survivedThreeImmobilizesInFight'),
+      unseenRecalls: challengeNum(ch, 'unseenRecalls'),
       champion:     p.championName,
+      champLevel:   Number(p.champLevel) || null,
       kills:        p.kills,
       deaths:       p.deaths,
       assists:      p.assists,
@@ -1195,13 +1690,82 @@ async function normalizeDashboard({
       queueType:    QUEUE_NAMES[m.info.queueId] || 'Other',
       region,
       dpm:          p.totalDamageDealtToChampions / mins,
+      dpmEarly:     phaseDpm.dpmEarly,
+      dpmMid:       phaseDpm.dpmMid,
+      dpmLate:      phaseDpm.dpmLate,
       gpm:          p.goldEarned / mins,
       visionPerMin: p.visionScore / mins,
+      visionScore: Number(p.visionScore) || 0,
+      wardsPlaced: Number(p.wardsPlaced) || 0,
+      wardsKilled: Number(p.wardsKilled) || 0,
+      controlWardsBought: Number(p.visionWardsBoughtInGame) || 0,
+      controlWardsPlaced: Number(p.detectorWardsPlaced) || 0,
+      wardsPlacedPerMin: (Number(p.wardsPlaced) || 0) / mins,
+      wardsKilledPerMin: (Number(p.wardsKilled) || 0) / mins,
+      controlWardsPerMin: (Number(p.visionWardsBoughtInGame) || 0) / mins,
+      stealthWardsPlaced: challengeNum(ch, 'stealthWardsPlaced')
+        ?? Math.max(0, (Number(p.wardsPlaced) || 0) - (Number(p.detectorWardsPlaced) || 0)),
+      wardTakedowns: challengeNum(ch, 'wardTakedowns') ?? (Number(p.wardsKilled) || 0),
+      wardsGuarded: challengeNum(ch, 'wardsGuarded'),
+      controlWardRiverCoverage: challengeNum(ch, 'controlWardTimeCoverageInRiverOrEnemyHalf'),
+      challengeControlWardsPlaced: challengeNum(ch, 'controlWardsPlaced'),
+      challengeVisionPerMin: challengeNum(ch, 'visionScorePerMinute'),
+      mostWardsOneSweeper: (() => {
+        const explicit = challengeNum(ch, 'mostWardsDestroyedOneSweeper');
+        if (explicit != null) return explicit;
+        const two = challengeNum(ch, 'twoWardsOneSweeperCount');
+        const three = challengeNum(ch, 'threeWardsOneSweeperCount');
+        // Riot often omits max/3-count keys when 0, but still sends twoWardsOneSweeperCount.
+        if (two == null && three == null) return null;
+        if ((three || 0) > 0) return 3;
+        if ((two || 0) > 0) return 2;
+        return (Number(p.wardsKilled) || 0) > 0 ? 1 : 0;
+      })(),
+      twoWardsOneSweeper: challengeNum(ch, 'twoWardsOneSweeperCount'),
+      threeWardsOneSweeper: (() => {
+        const three = challengeNum(ch, 'threeWardsOneSweeperCount');
+        if (three != null) return three;
+        // Same omit-when-zero behavior as above — show 0 once the sweeper challenge family exists.
+        return challengeNum(ch, 'twoWardsOneSweeperCount') != null ? 0 : null;
+      })(),
+      wardsPlaced15: visionTiming.wardsPlaced15,
+      wardsKilled15: visionTiming.wardsKilled15,
+      controlPlaced15: visionTiming.controlPlaced15,
+      wardsPlaced20: visionTiming.wardsPlaced20,
+      wardsKilled20: visionTiming.wardsKilled20,
+      controlPlaced20: visionTiming.controlPlaced20,
       kp:           teamKills > 0 ? (p.kills + p.assists) / teamKills : 0,
       goldDiff15,
       kaDiff15,
+      cs15,
+      csDiff15,
+      xpDiff15,
+      dmg15,
+      taken15,
+      tradeDiff15: (dmg15 != null && taken15 != null) ? dmg15 - taken15 : null,
+      kills15,
+      deaths15,
+      plates15,
+      roamKills15,
+      roamAssists15,
+      maxCsAdvantage: challengeNum(p.challenges, 'maxCsAdvantageOnLaneOpponent'),
+      maxLevelLead: challengeNum(p.challenges, 'maxLevelLeadLaneOpponent'),
+      laneVisionAdv: challengeNum(p.challenges, 'visionScoreAdvantageLaneOpponent'),
+      laneGoldExpAdv: challengeNum(p.challenges, 'laningPhaseGoldExpAdvantage'),
+      earlyLaneGoldExpAdv: challengeNum(p.challenges, 'earlyLaningPhaseGoldExpAdvantage'),
+      laneMinions10: challengeNum(p.challenges, 'laneMinionsFirst10Minutes'),
+      turretPlates: challengeNum(p.challenges, 'turretPlatesTaken') ?? plates15,
+      otherLaneKillsEarly: challengeNum(p.challenges, 'killsOnOtherLanesEarlyGameAsLaner')
+        ?? (roamKills15 != null ? roamKills15 : null),
+      teleportTakedowns: challengeNum(p.challenges, 'teleportTakedowns'),
+      takedownsFirst25: challengeNum(p.challenges, 'takedownsFirst25Minutes'),
       damage,
       damageShare,
+      goldShare,
+      visionShare,
+      objDamageShare,
+      assistsAvg: Number(p.assists) || 0,
+      shieldPerMin: (Number(p.totalDamageShieldedOnTeammates) || 0) / mins,
       buildPurchases: purchases,
       buildPath:    purchases.map((row) => row.id),
       earlyScore:   phases.early,
@@ -1210,6 +1774,71 @@ async function normalizeDashboard({
       deaths4:      p.deaths,
       killsAssists: p.kills + p.assists,
       csm:          p.totalMinionsKilled + p.neutralMinionsKilled,
+      objDpm:       (p.damageDealtToObjectives || 0) / mins,
+      towerDpm:     (p.damageDealtToTurrets || 0) / mins,
+      turretTakedowns: Number(p.turretTakedowns ?? p.turretKills) || 0,
+      inhibTakedowns: Number(p.inhibitorTakedowns ?? p.inhibitorKills) || 0,
+      nexusTakedowns: Number(p.nexusTakedowns ?? p.nexusKills) || 0,
+      objStolen:    Number(p.objectivesStolen) || 0,
+      objStolenAssists: Number(p.objectivesStolenAssists) || 0,
+      firstTower:   !!teamObj?.tower?.first,
+      firstTowerKill: !!p.firstTowerKill,
+      firstTowerAssist: !!p.firstTowerAssist,
+      firstDragon: !!teamObj?.dragon?.first,
+      firstBaron: !!teamObj?.baron?.first,
+      firstHerald: !!teamObj?.riftHerald?.first,
+      teamDragonKills: Number(teamObj?.dragon?.kills) || 0,
+      teamBaronKills: Number(teamObj?.baron?.kills) || 0,
+      teamHeraldKills: Number(teamObj?.riftHerald?.kills) || 0,
+      dragonTakes: objTakes.dragonTakes != null
+        ? objTakes.dragonTakes
+        : challengeNum(ch, 'dragonTakedowns'),
+      baronTakes: objTakes.baronTakes != null
+        ? objTakes.baronTakes
+        : challengeNum(ch, 'baronTakedowns'),
+      heraldTakes: objTakes.heraldTakes != null
+        ? objTakes.heraldTakes
+        : challengeNum(ch, 'riftHeraldTakedowns'),
+      grubTakes: objTakes.grubTakes,
+      atakhanTakes: objTakes.atakhanTakes,
+      epicTakes: objTakes.epicTakes != null
+        ? objTakes.epicTakes
+        : (() => {
+          const parts = [
+            challengeNum(ch, 'dragonTakedowns'),
+            challengeNum(ch, 'baronTakedowns'),
+            challengeNum(ch, 'riftHeraldTakedowns'),
+          ].filter((v) => v != null);
+          return parts.length ? parts.reduce((a, b) => a + b, 0) : null;
+        })(),
+      dragonTakedowns: challengeNum(ch, 'dragonTakedowns'),
+      baronTakedowns: challengeNum(ch, 'baronTakedowns'),
+      riftHeraldTakedowns: challengeNum(ch, 'riftHeraldTakedowns'),
+      epicMonsterSteals: challengeNum(ch, 'epicMonsterSteals'),
+      epicMonsterStolenWithoutSmite: challengeNum(ch, 'epicMonsterStolenWithoutSmite'),
+      epicMonsterKillsNearEnemyJungler: challengeNum(ch, 'epicMonsterKillsNearEnemyJungler'),
+      outerTurretExecutesBefore10: challengeNum(ch, 'outerTurretExecutesBefore10Minutes'),
+      turretsTakenWithHerald: challengeNum(ch, 'turretsTakenWithRiftHerald'),
+      wardTakedownsBefore20: challengeNum(ch, 'wardTakedownsBefore20M'),
+      soloKills,
+      soloDeaths,
+      laneSoloKills: duels.laneSoloKills,
+      laneSoloDeaths: duels.laneSoloDeaths,
+      quickSoloKills: Number.isFinite(quickSoloKills) ? quickSoloKills : null,
+      soloKillShare: (p.kills > 0 && soloKills != null) ? soloKills / p.kills : null,
+      skirmishKills: fights.skirmishKills,
+      skirmishDeaths: fights.skirmishDeaths,
+      skirmishAssists: fights.skirmishAssists,
+      teamfightKills: fights.teamfightKills,
+      teamfightDeaths: fights.teamfightDeaths,
+      teamfightAssists: fights.teamfightAssists,
+      largestMultiKill: Number.isFinite(largestMultiKill) ? largestMultiKill : null,
+      largestKillingSpree: Number.isFinite(largestKillingSpree) ? largestKillingSpree : null,
+      multikills: challengeNum(ch, 'multikills'),
+      outnumberedKills: challengeNum(ch, 'outnumberedKills'),
+      skillshotsHit: challengeNum(ch, 'skillshotsHit'),
+      skillshotsDodged: challengeNum(ch, 'skillshotsDodged'),
+      abilityUses: challengeNum(ch, 'abilityUses'),
       allyTeam,
       enemyTeam,
       players,
@@ -1294,16 +1923,9 @@ async function normalizeDashboard({
         queueId: queue,
       })
     : recentGames;
-  const trackedGames = lpMode
+  const gamesOut = lpMode
     ? applyTrackedLp(synced, trackedLp, riotId, lpMode)
     : synced;
-  const gamesOut = lpMode
-    ? attachEstimatedLp(trackedGames, {
-        visibleMmr: rankedInfo.estMmr,
-        hiddenMmr,
-        lobbyMmrs,
-      })
-    : trackedGames;
   const deltas = skipDeltas ? flatDeltas() : await computeWeeklyDeltas(riotId, {
     kda: kdaVal, gdScore: gdScoreVal, kp: kpVal, csm: csPerMin,
     visionScore: visionVal, gpm: gpmVal, goldDiff15: gd15Val, kaDiff15: ka15Val,

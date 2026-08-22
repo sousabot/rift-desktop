@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getSummonerDashboard, getLiveGame } from '../services/riotApi';
 import { champIconUrl, platformLabel, profileIconUrl, useDdragonVersion } from '../services/ddragon';
-import { parsePlayerSearch, parseRiotId, playerQuery } from '../lib/playerRoute';
+import { parsePlayerSearch, parseProIdentity, parseRiotId, playerQuery } from '../lib/playerRoute';
+import { countryName, flagUrl } from '../lib/countryFlag';
 import { rememberPlayer } from '../lib/recentPlayers';
 import { apiUserMessage, noticeFromError } from '../lib/apiNotice';
 import { MODE_KEYS, MODE_LABEL, MODE_QUEUE } from '../lib/queues';
@@ -41,6 +42,14 @@ const fmtElapsed = (seconds = 0) => {
   const s = Math.max(0, Math.floor(seconds % 60));
   return `${m}:${String(s).padStart(2, '0')}`;
 };
+
+function teamCaption(identity) {
+  const team = String(identity?.team || '').trim();
+  const short = String(identity?.short || '').trim();
+  if (!team) return short;
+  if (short && !team.toLowerCase().includes(short.toLowerCase())) return `${team} · ${short}`;
+  return team;
+}
 
 function peakStoreKey(riotId, mode) {
   return `rift-peak-rank:${String(riotId || '').toLowerCase()}:${mode}`;
@@ -174,11 +183,9 @@ function LPRing({ lp, win }) {
 /* ─── RecentGameRow ────────────────────────────────────────── */
 function RecentGameRow({ game, active, onSelect }) {
   const { t } = useI18n();
-  const { champion, win, kills, deaths, assists, kda, ago, gdScore, lp, queueLabel, queueType, lpDelta, lpDeltaEst } = game;
+  const { champion, win, kills, deaths, assists, kda, ago, gdScore, lp, queueLabel, queueType, lpDelta } = game;
   const score = gdScore ?? lp;
-  const measured = formatLpDelta(lpDelta);
-  const lpLabel = measured || formatLpDelta(lpDeltaEst, true);
-  const estimated = Boolean(lpLabel) && !measured;
+  const lpLabel = formatLpDelta(lpDelta);
   return (
     <button
       type="button"
@@ -193,10 +200,7 @@ function RecentGameRow({ game, active, onSelect }) {
         <div className="db-recent-top-row">
           <span className={`db-recent-result ${win ? 'win' : 'loss'}`}>{win ? t('dash.win') : t('dash.loss')}</span>
           {lpLabel ? (
-            <span
-              className={`db-recent-lp ${((measured ? lpDelta : lpDeltaEst) >= 0) ? 'is-up' : 'is-down'}${estimated ? ' is-est' : ''}`}
-              title={estimated ? t('dash.lpEstHint') : undefined}
-            >
+            <span className={`db-recent-lp ${lpDelta >= 0 ? 'is-up' : 'is-down'}`}>
               {lpLabel}
             </span>
           ) : null}
@@ -213,7 +217,7 @@ function RecentGameRow({ game, active, onSelect }) {
 /* ─── Dashboard ────────────────────────────────────────────── */
 export default function Dashboard() {
   const { session } = useSession();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const ddVersion = useDdragonVersion();
@@ -234,6 +238,28 @@ export default function Dashboard() {
   const [lcuCol, setLcuCol] = useState(null);
   const [peakRank, setPeakRank] = useState(null);
   const [estMmr, setEstMmr] = useState(null);
+  const [proIdentity, setProIdentity] = useState(null);
+
+  useEffect(() => {
+    const riotId = String(activeId || '').trim();
+    const hinted = parseProIdentity(searchParams);
+    if (!riotId.includes('#')) {
+      setProIdentity(null);
+      return undefined;
+    }
+    setProIdentity(hinted);
+    const api = typeof window !== 'undefined' ? window.prosAPI : null;
+    if (!api?.lookup) return undefined;
+    let cancelled = false;
+    api.lookup(riotId).then((res) => {
+      if (cancelled) return;
+      if (res?.ok && res.identity) setProIdentity(res.identity);
+      else if (!hinted) setProIdentity(null);
+    }).catch(() => {
+      if (!cancelled && !hinted) setProIdentity(null);
+    });
+    return () => { cancelled = true; };
+  }, [activeId, searchParams]);
 
   const lookup = {
     region: session?.region || 'europe',
@@ -557,6 +583,32 @@ export default function Dashboard() {
                           <span className="db-summoner-tag">#{profile.riotId?.split('#')[1]}</span>
                           <span className="db-summoner-tag">{profile.region || platformLabel(resolvedPlatform)}</span>
                         </div>
+                        {proIdentity && (proIdentity.country || proIdentity.team) ? (
+                          <div className="db-pro-row">
+                            {proIdentity.country ? (
+                              <span className="db-pro-chip">
+                                {flagUrl(proIdentity.country) ? (
+                                  <img src={flagUrl(proIdentity.country, 40)} alt="" />
+                                ) : null}
+                                {countryName(proIdentity.country, locale)}
+                                {proIdentity.lane ? ` · ${proIdentity.lane}` : ''}
+                              </span>
+                            ) : proIdentity.lane ? (
+                              <span className="db-pro-chip">{proIdentity.lane}</span>
+                            ) : null}
+                            {teamCaption(proIdentity) ? (
+                              <span className="db-pro-chip db-pro-chip--team">
+                                {proIdentity.logo ? (
+                                  <img src={proIdentity.logo} alt="" />
+                                ) : null}
+                                {teamCaption(proIdentity)}
+                              </span>
+                            ) : null}
+                            {proIdentity.name && proIdentity.name.toLowerCase() !== String(profile.riotId?.split('#')[0] || '').toLowerCase() ? (
+                              <span className="db-pro-chip db-pro-chip--handle">{proIdentity.name}</span>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
 
@@ -758,12 +810,18 @@ export default function Dashboard() {
                   </article>
                 )}
 
-                <article className="db-dpm-card db-card-overlays is-soon">
+                <article
+                  className="db-dpm-card db-card-overlays"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate('/overlays')}
+                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/overlays'); }}
+                >
                   <div className="db-overlays-dim" />
                   <div className="db-overlays-foot">
                     <span className="db-overlays-logo" aria-hidden="true" />
                     <span className="db-card-title-lg">Overlays</span>
-                    <span className="db-overlays-soon">Soon · Riot-safe only</span>
+                    <span className="db-overlays-soon">Benchmark HUD</span>
                   </div>
                 </article>
 

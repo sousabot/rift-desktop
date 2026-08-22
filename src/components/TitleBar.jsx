@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { playerSearchPath, parsePlayerSearch, parseRiotId, playerQuery } from '../lib/playerRoute';
 import { readRecentPlayers, rememberPlayer } from '../lib/recentPlayers';
 import { useSession } from '../state/SessionContext';
+import { usePremium } from '../state/PremiumContext';
 import { useI18n } from '../i18n/LocaleContext';
 import FeedbackForm from './FeedbackForm';
 import LOGO from '../assets/logo-mark.png';
@@ -52,6 +53,7 @@ function IconGear() {
 
 export default function TitleBar() {
   const { session } = useSession();
+  const { isPremium } = usePremium();
   const { t, locale, setLocale, locales } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
@@ -160,6 +162,13 @@ export default function TitleBar() {
       </div>
 
       <div className="rift-titlebar__right" onDoubleClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          className={`rift-titlebar__premium${isPremium ? ' is-owned' : ''}`}
+          onClick={() => navigate('/premium')}
+        >
+          {isPremium ? t('nav.premium') : t('chrome.getPremium')}
+        </button>
         <button type="button" className="rift-titlebar__feedback" onClick={() => setFeedbackOpen(true)}>
           <IconBug />
           {t('chrome.feedback')}

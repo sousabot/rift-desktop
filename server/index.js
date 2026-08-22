@@ -127,6 +127,7 @@ async function serverRiotFetch(url) {
 }
 
 const spectateFeed = require('../electron/spectate-feed').createScanner({ riotFetch: serverRiotFetch });
+const premium = require('./premium');
 
 async function postDiscord(payload) {
   const webhook = String(process.env.DISCORD_WEBHOOK_URL || '').trim();
@@ -190,6 +191,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && url.pathname === '/v1/premium/success') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(premium.successHtml(url.searchParams.get('session_id')));
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/v1/premium/cancel') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(premium.cancelHtml());
+    return;
+  }
+
+  if (req.method === 'GET' && url.pathname === '/v1/premium/status') {
+    send(res, 200, premium.statusPayload());
+    return;
+  }
+
   if (rateLimited(clientIp(req))) {
     send(res, 429, { error: 'Rate limit — wait 2 minutes and try again.' });
     return;
@@ -241,6 +259,37 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/v1/feedback') {
       await postDiscord(await readJson(req));
       send(res, 200, { ok: true });
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/premium/checkout') {
+      const body = await readJson(req);
+      const session = await premium.createCheckoutSession({
+        plan: body.plan,
+        deviceId: body.deviceId,
+        riotId: body.riotId,
+      }, req);
+      send(res, 200, session);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/premium/redeem') {
+      const body = await readJson(req);
+      const result = await premium.redeemCheckoutSession({
+        sessionId: body.sessionId,
+        deviceId: body.deviceId,
+      });
+      send(res, 200, result);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/v1/premium/gift') {
+      const body = await readJson(req);
+      const result = premium.redeemGiftCode(body.code, {
+        deviceId: body.deviceId,
+        riotId: body.riotId,
+      });
+      send(res, 200, result);
       return;
     }
 

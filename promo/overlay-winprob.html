@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rift overlay — win probability</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1280px;
+      height: 720px;
+      overflow: hidden;
+      font-family: "Segoe UI", system-ui, sans-serif;
+    }
+    .scene {
+      width: 1280px;
+      height: 720px;
+      position: relative;
+      background:
+        linear-gradient(180deg, rgba(8,12,24,0.2) 0%, rgba(8,12,24,0.5) 100%),
+        radial-gradient(ellipse 60% 40% at 70% 30%, rgba(80,40,40,0.35), transparent 55%),
+        radial-gradient(ellipse 50% 40% at 25% 60%, rgba(30,50,90,0.4), transparent 55%),
+        linear-gradient(145deg, #152030 0%, #1a2838 35%, #121c28 70%, #0a1018 100%);
+    }
+    .scene::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 48px, rgba(255,255,255,0.012) 48px 49px),
+        repeating-linear-gradient(0deg, transparent 0 48px, rgba(255,255,255,0.012) 48px 49px);
+      pointer-events: none;
+    }
+    .hud-minimap {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      width: 180px;
+      height: 180px;
+      border-radius: 8px;
+      border: 2px solid rgba(180,190,210,0.35);
+      background:
+        radial-gradient(circle at 65% 35%, #4a2a3a 0%, #2a1828 40%, #101820 75%),
+        #102018;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+      opacity: 0.85;
+    }
+    .hud-score {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 18px;
+      padding: 6px 16px;
+      border-radius: 6px;
+      background: rgba(10,14,22,0.72);
+      border: 1px solid rgba(160,180,220,0.25);
+      color: #dce4ff;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .hud-score .b { color: #9eb6ff; }
+    .hud-score .r { color: #ff8a8a; }
+
+    .panel {
+      position: absolute;
+      left: 28px;
+      top: 160px;
+    }
+
+    .ov-toast {
+      position: relative;
+      width: 200px;
+      background: rgba(28, 32, 48, 0.94);
+      border: 1px solid rgba(150, 175, 230, 0.55);
+      border-radius: 8px;
+      color: #fff;
+      padding: 6px 8px 10px;
+      overflow: hidden;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+    }
+    .ov-toast-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+    .ov-toast-head span {
+      font-size: 10px;
+      font-weight: 600;
+      color: #a8b8e8;
+      letter-spacing: 0.01em;
+      line-height: 1;
+    }
+    .ov-winprob-row {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 4px 4px 8px;
+    }
+    .ov-winprob-side {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .ov-winprob-side strong {
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -0.02em;
+    }
+    .ov-winprob-side span {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      opacity: 0.88;
+    }
+    .ov-winprob-side.is-blue strong { color: #9eb6ff; }
+    .ov-winprob-side.is-blue span { color: #b8c8ff; }
+    .ov-winprob-side.is-red {
+      align-items: flex-end;
+      text-align: right;
+    }
+    .ov-winprob-side.is-red strong { color: #ff8a8a; }
+    .ov-winprob-side.is-red span { color: #ffb0b0; }
+    .ov-winprob-bar {
+      height: 4px;
+      border-radius: 999px;
+      background: rgba(255, 120, 120, 0.35);
+      overflow: hidden;
+      margin: 0 2px;
+    }
+    .ov-winprob-bar i {
+      display: block;
+      height: 100%;
+      width: 68%;
+      background: linear-gradient(90deg, #6a8cff, #9eb6ff);
+      border-radius: 999px;
+    }
+  </style>
+</head>
+<body>
+  <div class="scene" id="shot">
+    <div class="hud-score"><span class="b">18</span> · 24:11 · <span class="r">14</span></div>
+    <div class="hud-minimap"></div>
+    <div class="panel">
+      <div class="ov-toast ov-winprob">
+        <header class="ov-toast-head"><span>Win probability</span></header>
+        <div class="ov-winprob-row">
+          <div class="ov-winprob-side is-blue">
+            <strong>68%</strong>
+            <span>BLUE</span>
+          </div>
+          <div class="ov-winprob-side is-red">
+            <strong>32%</strong>
+            <span>RED</span>
+          </div>
+        </div>
+        <div class="ov-winprob-bar" aria-hidden="true"><i></i></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

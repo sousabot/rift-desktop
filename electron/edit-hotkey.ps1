@@ -10,18 +10,34 @@ public static class GdKeys {
   public static bool CtrlB() {
     bool ctrl = (GetAsyncKeyState(0x11) & 0x8000) != 0;
     bool b = (GetAsyncKeyState(0x42) & 0x8000) != 0;
-    return ctrl && b;
+    return ctrl && b && !((GetAsyncKeyState(0x10) & 0x8000) != 0);
+  }
+
+  public static bool CtrlShiftS() {
+    bool ctrl = (GetAsyncKeyState(0x11) & 0x8000) != 0;
+    bool shift = (GetAsyncKeyState(0x10) & 0x8000) != 0;
+    bool s = (GetAsyncKeyState(0x53) & 0x8000) != 0;
+    return ctrl && shift && s;
   }
 }
 "@
 
-$wasDown = $false
+$editWasDown = $false
+$scoutWasDown = $false
 while ($true) {
-  $down = [GdKeys]::CtrlB()
-  if ($down -and -not $wasDown) {
-    [Console]::WriteLine('HOTKEY')
+  $editDown = [GdKeys]::CtrlB()
+  if ($editDown -and -not $editWasDown) {
+    [Console]::WriteLine('EDIT_HOTKEY')
     [Console]::Out.Flush()
   }
-  $wasDown = $down
+  $editWasDown = $editDown
+
+  $scoutDown = [GdKeys]::CtrlShiftS()
+  if ($scoutDown -and -not $scoutWasDown) {
+    [Console]::WriteLine('SCOUT_HOTKEY')
+    [Console]::Out.Flush()
+  }
+  $scoutWasDown = $scoutDown
+
   Start-Sleep -Milliseconds 40
 }

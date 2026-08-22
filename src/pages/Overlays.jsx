@@ -1,29 +1,36 @@
 import React, { useEffect, useState } from 'react';
+import { useI18n } from '../i18n/LocaleContext';
 import OverlayHud from './OverlayHud';
+import { useOverlayPanelToggles, OVERLAY_PANEL_LIST } from '../lib/overlayPanels';
 import './Overlays.css';
 
 export default function Overlays() {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [clickThrough, setClickThrough] = useState(true);
   const [inGame, setInGame] = useState(false);
   const [video, setVideo] = useState(null);
   const [status, setStatus] = useState(null);
+  const [attached, setAttached] = useState(false);
   const hasApi = typeof window !== 'undefined' && !!window.liveClient;
+  const { panels, setPanel } = useOverlayPanelToggles();
 
   const refresh = async () => {
     if (!window.liveClient) return;
-    const [isOpen, through, snap, mode, st] = await Promise.all([
+    const [isOpen, through, snap, mode, st, onLeague] = await Promise.all([
       window.liveClient.isOverlayOpen(),
       window.liveClient.getClickThrough(),
       window.liveClient.getSnapshot(),
       window.liveClient.getVideoMode?.() || Promise.resolve(null),
       window.liveClient.getStatus?.() || Promise.resolve(null),
+      window.liveClient.isAttached?.() || Promise.resolve(false),
     ]);
     setOpen(!!isOpen);
     setClickThrough(through !== false);
     setInGame(!!snap?.inGame);
     if (mode) setVideo(mode);
     if (st) setStatus(st);
+    setAttached(!!onLeague);
   };
 
   useEffect(() => {
@@ -48,55 +55,123 @@ export default function Overlays() {
     setClickThrough(!!next);
   };
 
-  const modeLabel = video?.label;
+  const modeLabel = video?.label || status?.video?.label;
+  const enabledCount = OVERLAY_PANEL_LIST.filter(({ id }) => panels[id] !== false).length;
 
   return (
     <div className="ovp-page">
       <header className="ovp-head">
-        <div>
-          <h1>Overlays</h1>
-          <p>In-game Benchmark HUD for this PC. Uses League’s local Live Client Data — no Riot cloud key.</p>
-        </div>
+        <span className="ovp-kicker">{t('nav.overlays')}</span>
+        <h1>{t('overlays.title')}</h1>
+        <p>{t('overlays.blurb')}</p>
       </header>
 
-      <section className="ovp-panel">
-        <div className="ovp-row">
-          <div>
-            <h2>In-game HUD</h2>
-            <p className="ovp-status">
-              Overlay is <strong>{open ? 'on' : 'off'}</strong>
-              {hasApi ? ` · ${inGame ? 'game detected' : 'waiting for a match'}` : ' · restart the desktop app to enable'}
-              {status?.engine === 'overwolf'
-                ? ` · ${status.injected ? `in-game${status.gameName ? ` (${status.gameName})` : ''}` : status.ready ? 'waiting to inject' : (status.phase === 'failed' ? 'overlay engine failed' : 'loading overlay engine')}`
-                : modeLabel ? ` · League video: ${video?.label || modeLabel}` : ''}
-              {status?.error ? ` · ${status.error}` : ''}
-            </p>
+      <section className="ovp-card ovp-card--control">
+        <div className="ovp-control-top">
+          <div className="ovp-control-copy">
+            <h2>{t('overlays.hudTitle')}</h2>
+            <div className="ovp-badges">
+              {!hasApi ? (
+                <span className="ovp-badge is-warn">{t('overlays.badgeNeedRestart')}</span>
+              ) : (
+                <>
+                  <span className={`ovp-badge${open ? ' is-on' : ''}`}>
+                    {open ? t('overlays.badgeOverlayOn') : t('overlays.badgeOverlayOff')}
+                  </span>
+                  <span className={`ovp-badge${inGame ? ' is-live' : ''}`}>
+                    {inGame ? t('overlays.badgeInGame') : t('overlays.badgeWaiting')}
+                  </span>
+                  {open ? (
+                    <span className={`ovp-badge${attached ? ' is-live' : ''}`}>
+                      {attached ? t('overlays.badgeAttached') : t('overlays.badgeNotAttached')}
+                    </span>
+                  ) : null}
+                  {modeLabel ? (
+                    <span className="ovp-badge is-muted">
+                      {t('overlays.videoMode', { mode: modeLabel })}
+                    </span>
+                  ) : null}
+                </>
+              )}
+            </div>
           </div>
-          <button type="button" className={`ovp-btn${open ? ' is-on' : ''}`} onClick={toggle} disabled={!hasApi}>
-            {open ? 'Hide overlay' : 'Show overlay'}
+          <button
+            type="button"
+            className={`ovp-btn ovp-btn--lg${open ? ' is-on' : ''}`}
+            onClick={toggle}
+            disabled={!hasApi}
+          >
+            {open ? t('overlays.hide') : t('overlays.show')}
           </button>
         </div>
 
-        <label className="ovp-check">
-          <input type="checkbox" checked={clickThrough} onChange={toggleClick} disabled={!hasApi} />
-          Click-through (clicks go to League; hover the top bar to drag or close)
-        </label>
-        <p className="ovp-status">
-          With the overlay on, press <strong>Ctrl+B</strong> in League to unlock the HUD, drag it, then Ctrl+B again to lock.
-          Shop may still open — close it and keep dragging.
-        </p>
+        <div className="ovp-setting-row">
+          <div className="ovp-setting-copy">
+            <strong>{t('overlays.settingClickThrough')}</strong>
+            <p>{t('overlays.settingClickThroughDesc')}</p>
+          </div>
+          <label className="ovp-switch">
+            <input
+              type="checkbox"
+              checked={clickThrough}
+              onChange={toggleClick}
+              disabled={!hasApi}
+            />
+            <span aria-hidden="true" />
+          </label>
+        </div>
+
+        <div className="ovp-hotkeys">
+          <h3>{t('overlays.hotkeysTitle')}</h3>
+          <ul>
+            <li>{t('overlays.hotkeyEdit')}</li>
+            <li>{t('overlays.hotkeyScout')}</li>
+          </ul>
+        </div>
 
         <div className="ovp-warn">
-          {status?.engine === 'overwolf'
-            ? (status?.error
-              ? status.error
-              : 'Fullscreen is fine. The HUD appears in-game after the overlay engine injects. Keep Rift.lol open until status says in-game, then click back into the match.')
-            : 'This session is running as stock Electron, so Fullscreen still cannot show the HUD. Fully quit and run npm run dev again so Overwolf Electron starts.'}
+          {video?.applyNow ? t('overlays.warnApply') : t('overlays.warnBorderless')}
         </div>
       </section>
 
-      <section className="ovp-panel">
-        <h2>Preview</h2>
+      <section className="ovp-card">
+        <header className="ovp-section-head">
+          <div>
+            <h2>{t('overlays.panelsTitle')}</h2>
+            <p>{t('overlays.panelsLead')}</p>
+          </div>
+          <span className="ovp-count">
+            {enabledCount}/{OVERLAY_PANEL_LIST.length}
+          </span>
+        </header>
+        <div className="ovp-panels-grid">
+          {OVERLAY_PANEL_LIST.map(({ id, titleKey, descKey }) => {
+            const on = panels[id] !== false;
+            return (
+              <label key={id} className={`ovp-panel-toggle${on ? ' is-on' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={(e) => setPanel(id, e.target.checked)}
+                  disabled={!hasApi}
+                />
+                <span className="ovp-panel-toggle-body">
+                  <strong>{t(titleKey)}</strong>
+                  <span>{t(descKey)}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="ovp-card ovp-card--preview">
+        <header className="ovp-section-head">
+          <div>
+            <h2>{t('overlays.preview')}</h2>
+            <p>{t('overlays.previewLead')}</p>
+          </div>
+        </header>
         <OverlayHud preview />
       </section>
     </div>

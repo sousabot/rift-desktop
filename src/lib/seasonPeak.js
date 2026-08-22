@@ -1,4 +1,4 @@
-import { mmrFromTierInfo } from './rankMmr';
+import { mergePeakRank, mmrFromTierInfo, rankSnapshot } from './rankMmr';
 
 const PLATFORM_TO_OPGG = {
   euw1: 'euw',
@@ -24,24 +24,51 @@ function regionOf(platform) {
   return PLATFORM_TO_OPGG[String(platform || '').toLowerCase()] || 'euw';
 }
 
+function isSummonerProfile(data) {
+  return Boolean(
+    data
+    && typeof data === 'object'
+    && !Array.isArray(data)
+    && (data.puuid || data.current_season_high_tiers || data.league_stats),
+  );
+}
+
 function profileData(json) {
-  const data = json?.data && !Array.isArray(json.data) ? json.data : json;
-  if (!data || Array.isArray(data)) return null;
-  return data;
+  if (!json || typeof json !== 'object') return null;
+  if (isSummonerProfile(json.data)) return json.data;
+  if (isSummonerProfile(json)) return json;
+  return null;
+}
+
+function puuidFrom(json, fallback) {
+  if (Array.isArray(json?.data)) return json.data[0]?.puuid || fallback || null;
+  return json?.data?.puuid || json?.puuid || fallback || null;
+}
+
+function rawPeak(tier, division, lp) {
+  const snap = rankSnapshot(tier, division, lp);
+  if (!snap) return null;
+  return { tier: snap.tier, division: snap.division, lp: snap.lp };
 }
 
 export function peakFromOpggJson(json, flex = false) {
   const data = profileData(json);
   if (!data) return null;
   const want = flex ? 'FLEXRANKED' : 'SOLORANKED';
-  const row = (data.current_season_high_tiers?.rank_entries || []).find((entry) => entry?.game_type === want);
-  const info = row?.high_rank_info;
-  if (!info?.tier) return null;
-  return {
-    tier: String(info.tier).toUpperCase(),
-    division: info.division,
-    lp: info.lp,
-  };
+  const rows = [];
+  const high = (data.current_season_high_tiers?.rank_entries || []).find((entry) => entry?.game_type === want);
+  if (high?.high_rank_info?.tier) {
+    rows.push(rawPeak(high.high_rank_info.tier, high.high_rank_info.division, high.high_rank_info.lp));
+  }
+  if (!flex) {
+    for (const row of data.lp_histories || []) {
+      const info = row?.tier_info;
+      if (info?.tier) rows.push(rawPeak(info.tier, info.division, info.lp));
+    }
+  }
+  const best = mergePeakRank(...rows.filter(Boolean).map((row) => rankSnapshot(row.tier, row.division, row.lp)));
+  if (!best) return null;
+  return { tier: best.tier, division: best.division, lp: best.lp };
 }
 
 function lobbyMmrFromGame(game, puuid) {
@@ -103,11 +130,14 @@ async function fetchOpggContext({ puuid, platform, flex = false, riotId } = {}) 
   for (const url of urls) {
     try {
       const json = await fetchJson(url);
-      const direct = profileData(json);
-      const found = direct?.puuid || json?.data?.[0]?.puuid || puuid;
-      const profile = direct || (found ? profileData(await fetchJson(
-        `https://lol-api-summoner.op.gg/api/v3/${region}/summoners/${encodeURIComponent(found)}?hl=en_US`,
-      )) : null);
+      let profile = profileData(json);
+      const found = profile?.puuid || puuidFrom(json, puuid);
+      if ((!profile || !profile.current_season_high_tiers) && found) {
+        const full = profileData(await fetchJson(
+          `https://lol-api-summoner.op.gg/api/v3/${region}/summoners/${encodeURIComponent(found)}?hl=en_US`,
+        ));
+        if (full) profile = full;
+      }
       if (!profile) continue;
       const peak = peakFromOpggJson({ data: profile }, flex);
       const id = profile.puuid || found;
@@ -131,10 +161,10 @@ export async function loadOpggRankContext(args = {}) {
 
   const http = await fetchOpggContext(args);
   let result = http;
-  if (!http.peak && !http.lobbyMmrs.length && typeof window !== 'undefined' && window.riotAPI?.getSeasonPeak) {
+  if (!http.peak && typeof window !== 'undefined' && window.riotAPI?.getSeasonPeak) {
     try {
       const row = await window.riotAPI.getSeasonPeak(args);
-      if (row?.tier) result = { peak: row, lobbyMmrs: [], puuid: args.puuid || null };
+      if (row?.tier) result = { ...http, peak: row };
     } catch { /* ignore */ }
   }
   contextCache.set(key, { at: Date.now(), data: result });

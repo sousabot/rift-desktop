@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink, useSearchParams } from 'react-router-dom';
 import { useI18n } from '../i18n/LocaleContext';
+import { usePremium } from '../state/PremiumContext';
 import './Sidebar.css';
 
 function IconHome() {
@@ -115,6 +116,23 @@ function IconDraft() {
     </svg>
   );
 }
+function IconStudio() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M3.5 14.5 7 9.5l3 3 6.5-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M3.5 16.5h13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  );
+}
+function IconLens() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <circle cx="10" cy="10" r="6.2" stroke="currentColor" strokeWidth="1.5"/>
+      <circle cx="10" cy="10" r="2.2" stroke="currentColor" strokeWidth="1.5"/>
+      <path d="M10 3.8v1.6M10 14.6v1.6M3.8 10h1.6M14.6 10h1.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  );
+}
 
 const NAV_GROUPS = [
   {
@@ -135,7 +153,7 @@ const NAV_GROUPS = [
       { to: '/link-account', labelKey: 'nav.link', icon: <IconLink /> },
       { to: '/draft', labelKey: 'nav.draft', icon: <IconDraft /> },
       { labelKey: 'nav.replays', icon: <IconReplay />, soon: true },
-      { labelKey: 'nav.overlays', icon: <IconGrid />, soon: true },
+      { to: '/overlays', labelKey: 'nav.overlays', icon: <IconGrid /> },
       { to: '/spectate', labelKey: 'nav.spectate', icon: <IconWatch /> },
       { to: '/collections', labelKey: 'nav.collections', icon: <IconCollection /> },
     ],
@@ -144,11 +162,13 @@ const NAV_GROUPS = [
     labelKey: 'nav.insights',
     items: [
       { to: '/pros', labelKey: 'nav.esports', icon: <IconEsports /> },
+      { to: '/studio', labelKey: 'nav.studio', icon: <IconStudio />, gated: true },
+      { to: '/lens', labelKey: 'nav.lens', icon: <IconLens />, gated: true },
     ],
   },
 ];
 
-const PLAYER_PATHS = new Set(['/', '/history', '/champions', '/live']);
+const PLAYER_PATHS = new Set(['/', '/history', '/champions', '/live', '/studio', '/lens']);
 
 function playerNavTo(to, searchParams) {
   if (!PLAYER_PATHS.has(to)) return to;
@@ -165,6 +185,8 @@ function playerNavTo(to, searchParams) {
 export default function Sidebar() {
   const [searchParams] = useSearchParams();
   const { t } = useI18n();
+  const { isPremium } = usePremium();
+  const showLock = !isPremium;
 
   return (
     <aside className="rift-sidebar">
@@ -190,12 +212,28 @@ export default function Sidebar() {
                 >
                   <span className="rift-sidebar__icon">{item.icon}</span>
                   {t(item.labelKey)}
+                  {showLock && item.gated ? (
+                    <span className="rift-sidebar__lock" aria-hidden>
+                      <svg viewBox="0 0 12 12" fill="none">
+                        <rect x="2.25" y="5.25" width="7.5" height="5.25" rx="1.2" stroke="currentColor" strokeWidth="1.2"/>
+                        <path d="M4 5.25V3.7a2 2 0 0 1 4 0v1.55" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                      </svg>
+                    </span>
+                  ) : null}
                 </NavLink>
               )
             ))}
           </div>
         ))}
       </nav>
+      <NavLink
+        to="/premium"
+        className={({ isActive }) =>
+          `rift-sidebar__premium${isActive ? ' is-on' : ''}${isPremium ? ' is-owned' : ''}`
+        }
+      >
+        {isPremium ? t('nav.premium') : t('chrome.getPremium')}
+      </NavLink>
     </aside>
   );
 }

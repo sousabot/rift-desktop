@@ -222,6 +222,50 @@ button.db-filter-label { cursor: pointer; font: inherit; }
 }
 .db-profile-meta { display: flex; align-items: center; gap: 8px; }
 .db-summoner-tag { font-size: 14px; color: #c9c3e8; font-weight: 600; }
+.db-pro-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.db-pro-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+  padding: 3px 9px 3px 6px;
+  border-radius: 999px;
+  background: rgba(8, 10, 20, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #efeafc;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.db-pro-chip img {
+  width: 16px;
+  height: 12px;
+  object-fit: cover;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.db-pro-chip--team img {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.06);
+}
+.db-pro-chip--handle {
+  color: #c9c3e8;
+  font-weight: 600;
+}
 
 .db-rank-card {
   min-width: 268px;
@@ -551,7 +595,7 @@ button.db-filter-label { cursor: pointer; font: inherit; }
 .db-card-perf-stats .is-gold { color: #ffb454; }
 .db-card-perf-stats .is-green { color: #3ecf8e; }
 
-.db-card-overlays { padding: 0; justify-content: flex-end; }
+.db-card-overlays { padding: 0; justify-content: flex-end; cursor: pointer; }
 .db-overlays-bg {
   position: absolute; inset: 0; width: 100%; height: 100%;
   object-fit: cover; object-position: center 30%;

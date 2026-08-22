@@ -47,6 +47,16 @@ function applyEnvFile(filePath) {
       || key === 'RIFT_APP_TOKEN'
       || key === 'GD_API_URL'
       || key === 'GD_APP_TOKEN'
+      || key === 'STRIPE_SECRET_KEY'
+      || key === 'STRIPE_PRICE_MONTH'
+      || key === 'STRIPE_PRICE_SIX'
+      || key === 'STRIPE_PRICE_YEAR'
+      || key === 'STRIPE_PRODUCT_MONTH'
+      || key === 'STRIPE_PRODUCT_SIX'
+      || key === 'STRIPE_PRODUCT_YEAR'
+      || key === 'PREMIUM_LICENSE_SECRET'
+      || key === 'PREMIUM_GIFT_CODES'
+      || key === 'STRIPE_PUBLIC_URL'
       || !process.env[key]
     ) {
       process.env[key] = value;
@@ -362,6 +372,8 @@ module.exports = function registerRiotHandlers(ipcMain) {
   });
 
   ipcMain.handle('riot:linkAccount', async (_e, { gameName, tagLine, region, platform }) => {
+    // Ownership: must be logged into this Riot ID in the local League client.
+    await require('./lcu').assertLoggedInAs(gameName, tagLine);
     const account = await fetchAccountByRiotId(gameName, tagLine, region);
     const accountRegion = accountHost(region);
     const shard = await findLeagueShard(account.puuid, platform, accountRegion);
@@ -584,6 +596,22 @@ module.exports = function registerRiotHandlers(ipcMain) {
       return data;
     },
   });
+  require('./lens-benchmarks')(ipcMain, {
+    riotFetch,
+    mapWithConcurrency,
+    matchRegionOf: (platform) => PLATFORM_TO_MATCH_REGION[platform] || 'europe',
+    matchCache,
+    fetchMatch: async (region, id, bag) => {
+      const cache = bag || matchCache.readCache();
+      const key = `match:${id}`;
+      if (cache[key]?.data) return cache[key].data;
+      const data = await riotFetch(`https://${region}.api.riotgames.com/lol/match/v5/matches/${id}`, 2);
+      cache[key] = { timestamp: Date.now(), data };
+      if (!bag) matchCache.writeCache(cache);
+      return data;
+    },
+  });
+  require('./studio-meta')(ipcMain);
   require('./feedback-ipc')(ipcMain);
 };
 

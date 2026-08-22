@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Rift overlay — skill</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 1280px;
+      height: 720px;
+      overflow: hidden;
+      font-family: "Segoe UI", system-ui, sans-serif;
+    }
+    .scene {
+      width: 1280px;
+      height: 720px;
+      position: relative;
+      background:
+        linear-gradient(180deg, rgba(8,12,24,0.25) 0%, rgba(8,12,24,0.55) 100%),
+        radial-gradient(ellipse 70% 50% at 50% 40%, rgba(40,80,60,0.35), transparent 60%),
+        linear-gradient(160deg, #1a3a2a 0%, #0e1a28 40%, #152018 70%, #0a1218 100%);
+    }
+    .scene::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 48px, rgba(255,255,255,0.015) 48px 49px),
+        repeating-linear-gradient(0deg, transparent 0 48px, rgba(255,255,255,0.015) 48px 49px);
+      opacity: 0.5;
+      pointer-events: none;
+    }
+    /* fake minimap / HUD chrome for “in game” feel */
+    .hud-minimap {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      width: 180px;
+      height: 180px;
+      border-radius: 8px;
+      border: 2px solid rgba(180,190,210,0.35);
+      background:
+        radial-gradient(circle at 30% 70%, #2a6a4a 0%, #1a4030 40%, #0e2018 70%),
+        #102018;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+      opacity: 0.85;
+    }
+    .hud-score {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 18px;
+      padding: 6px 16px;
+      border-radius: 6px;
+      background: rgba(10,14,22,0.72);
+      border: 1px solid rgba(160,180,220,0.25);
+      color: #dce4ff;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .hud-score .b { color: #9eb6ff; }
+    .hud-score .r { color: #ff8a8a; }
+
+    .panel {
+      position: absolute;
+      left: 28px;
+      bottom: 120px;
+    }
+
+    .ov-toast {
+      position: relative;
+      width: 236px;
+      background: rgba(28, 32, 48, 0.94);
+      border: 1px solid rgba(150, 175, 230, 0.55);
+      border-radius: 8px;
+      color: #fff;
+      padding: 6px 8px 8px;
+      overflow: hidden;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+    }
+    .ov-toast-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 5px;
+    }
+    .ov-toast-head span {
+      font-size: 10px;
+      font-weight: 600;
+      color: #a8b8e8;
+      letter-spacing: 0.01em;
+      line-height: 1;
+    }
+    .ov-skill-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 2px 2px 4px;
+    }
+    .ov-skill-champ {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 1px solid rgba(160, 185, 235, 0.45);
+      background: rgba(10, 14, 28, 0.55);
+      flex-shrink: 0;
+    }
+    .ov-skill-spell-wrap {
+      position: relative;
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
+    }
+    .ov-skill-spell {
+      display: block;
+      width: 40px;
+      height: 40px;
+      border-radius: 6px;
+      object-fit: cover;
+      border: 1px solid rgba(160, 185, 235, 0.5);
+      background: rgba(10, 14, 28, 0.55);
+    }
+    .ov-skill-key {
+      position: absolute;
+      right: -2px;
+      bottom: -3px;
+      min-width: 16px;
+      height: 15px;
+      padding: 0 3px;
+      border-radius: 3px;
+      background: #0a0c12;
+      border: 1px solid rgba(200, 210, 235, 0.35);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 800;
+      line-height: 13px;
+      text-align: center;
+      font-style: normal;
+    }
+    .ov-skill-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+      flex: 1;
+    }
+    .ov-skill-copy strong {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: #fff;
+      line-height: 1;
+    }
+    .ov-skill-up {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 1px;
+      width: 10px;
+      height: 12px;
+      position: relative;
+    }
+    .ov-skill-up::before,
+    .ov-skill-up::after {
+      content: '';
+      display: block;
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-bottom: 5px solid #9eb6ff;
+      margin: 0 auto;
+    }
+    .ov-skill-dots {
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+    .ov-skill-dots i {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      border: 1.5px solid rgba(150, 170, 230, 0.55);
+      background: transparent;
+      box-sizing: border-box;
+    }
+    .ov-skill-dots i.is-on {
+      background: #9eb6ff;
+      border-color: #9eb6ff;
+    }
+  </style>
+</head>
+<body>
+  <div class="scene" id="shot">
+    <div class="hud-score"><span class="b">12</span> · 18:42 · <span class="r">9</span></div>
+    <div class="hud-minimap"></div>
+    <div class="panel">
+      <div class="ov-toast ov-skill">
+        <header class="ov-toast-head"><span>Next skill level up</span></header>
+        <div class="ov-skill-row">
+          <img class="ov-skill-champ" src="https://ddragon.leagueoflegends.com/cdn/15.16.1/img/champion/Ahri.png" alt="" />
+          <span class="ov-skill-spell-wrap">
+            <img class="ov-skill-spell" src="https://ddragon.leagueoflegends.com/cdn/15.16.1/img/spell/AhriQ.png" alt="Q" />
+            <em class="ov-skill-key">Q</em>
+          </span>
+          <div class="ov-skill-copy">
+            <strong>LEVEL 5<span class="ov-skill-up"></span></strong>
+            <span class="ov-skill-dots" aria-hidden="true">
+              <i class="is-on"></i><i class="is-on"></i><i class="is-on"></i><i></i><i></i>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

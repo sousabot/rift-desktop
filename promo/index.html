@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rift.lol — Beta trailer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0b0e16;
+      --violet: #7c5cff;
+      --gold: #ffb454;
+      --text: #eceefb;
+      --muted: #8890b5;
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%; background: #000; color: var(--text);
+      font-family: Inter, sans-serif; overflow: hidden; user-select: none;
+    }
+    .stage {
+      position: relative; width: 100vw; height: 100vh;
+      display: grid; place-items: center; background: #000;
+    }
+    .frame {
+      width: min(100vw, calc(100vh * 16 / 9));
+      height: min(100vh, calc(100vw * 9 / 16));
+      position: relative; overflow: hidden; background: var(--bg);
+    }
+    .scene {
+      position: absolute; inset: 0; opacity: 0; pointer-events: none;
+      visibility: hidden;
+    }
+    .scene.is-on { opacity: 1; visibility: visible; }
+    .ken { width: 100%; height: 100%; transform: scale(1.08); }
+    .scene.is-on .ken { animation: ken 5.2s var(--ease) forwards; }
+    .scene.is-on[data-len="long"] .ken { animation-duration: 7.5s; }
+    .scene.is-on[data-len="end"] .ken { animation-duration: 11.5s; }
+    @keyframes ken { to { transform: scale(1); } }
+
+    .stamp {
+      position: absolute; top: 28px; left: 28px; z-index: 5;
+      background: var(--violet); color: #fff; font-family: "Space Grotesk", sans-serif;
+      font-weight: 700; letter-spacing: 0.14em; font-size: 13px;
+      padding: 10px 14px; text-transform: uppercase;
+    }
+    .progress {
+      position: absolute; left: 0; right: 0; bottom: 0; height: 3px; z-index: 20;
+      background: rgba(255,255,255,0.08);
+    }
+    .progress > i {
+      display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--violet), var(--gold));
+    }
+    .progress.is-run > i { animation: bar 43.5s linear forwards; }
+    @keyframes bar { to { width: 100%; } }
+
+    /* Logo */
+    .logo-scene { background: #07080c center/cover no-repeat; }
+    .wisps, .wisps::before, .wisps::after {
+      position: absolute; left: -20%; right: -20%; height: 70px; top: 46%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.09), transparent);
+      filter: blur(8px); opacity: 0.45;
+    }
+    .wisps { animation: drift 5.2s linear infinite; }
+    .wisps::before { content: ""; top: -40px; animation: drift 7s linear infinite reverse; }
+    .wisps::after { content: ""; top: 50px; opacity: 0.25; }
+    @keyframes drift { from { transform: translateX(-8%); } to { transform: translateX(8%); } }
+    .logo-lock {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 18px;
+    }
+    .logo-lock img {
+      width: 168px; height: 168px; object-fit: contain;
+      filter: drop-shadow(0 0 28px rgba(255, 140, 40, 0.45));
+      animation: pop 0.7s var(--ease) both;
+    }
+    .logo-lock h1 {
+      margin: 0; font-family: "Space Grotesk", sans-serif; font-size: 42px;
+      letter-spacing: 0.18em; font-weight: 700; animation: up 0.8s 0.15s var(--ease) both;
+    }
+    .logo-lock p {
+      margin: 0; color: var(--gold); letter-spacing: 0.42em; font-size: 12px;
+      font-weight: 700; animation: up 0.8s 0.28s var(--ease) both;
+    }
+    @keyframes pop { from { opacity: 0; transform: scale(0.86); } }
+    @keyframes up { from { opacity: 0; transform: translateY(12px); } }
+
+    .hand {
+      position: absolute; width: 28px; height: 28px; z-index: 8; opacity: 0;
+      filter: drop-shadow(0 2px 4px #000);
+    }
+    .logo-scene.is-on .hand {
+      animation: click 5.2s var(--ease) forwards;
+    }
+    @keyframes click {
+      0% { opacity: 0; left: 62%; top: 62%; }
+      25% { opacity: 1; left: 50%; top: 46%; }
+      38% { transform: scale(0.86); left: 50%; top: 46%; }
+      45% { transform: scale(1); }
+      80% { opacity: 1; }
+      100% { opacity: 0; left: 50%; top: 46%; }
+    }
+
+    /* App chrome */
+    .app {
+      display: flex; flex-direction: column; height: 100%;
+      background: #0b0e16;
+      background-image:
+        radial-gradient(circle at 12% 0%, rgba(124, 92, 255, 0.08), transparent 42%),
+        radial-gradient(circle at 88% 16%, rgba(255, 180, 84, 0.05), transparent 38%);
+    }
+    .bar {
+      height: 42px; display: flex; align-items: center; gap: 10px;
+      padding: 0 14px; border-bottom: 1px solid rgba(255,255,255,0.08);
+      font-size: 12px; color: var(--muted);
+    }
+    .bar img { width: 22px; height: 22px; }
+    .bar b { color: var(--text); font-family: "Space Grotesk", sans-serif; font-weight: 600; }
+    .dots { margin-left: auto; display: flex; gap: 8px; }
+    .dots i { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.18); display: block; }
+    .body { display: flex; flex: 1; min-height: 0; }
+    .side {
+      width: 188px; padding: 16px 12px; border-right: 1px solid rgba(255,255,255,0.08);
+      font-size: 12px; color: var(--muted);
+    }
+    .side .g { font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; margin: 14px 8px 8px; opacity: 0.7; }
+    .side a, .side span {
+      display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px;
+    }
+    .side .on { background: rgba(124,92,255,0.16); color: #fff; }
+    .soon { margin-left: auto; font-size: 9px; color: var(--gold); }
+    .main { flex: 1; padding: 18px 22px; overflow: hidden; }
+
+    h2 { margin: 0; font-family: "Space Grotesk", sans-serif; font-size: 26px; letter-spacing: -0.03em; }
+    .sub { margin: 6px 0 14px; font-size: 12px; color: var(--muted); max-width: 560px; }
+
+    .row { display: flex; gap: 10px; align-items: center; }
+    .pill { font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+      padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(62,207,142,0.35);
+      color: #3ecf8e; background: rgba(62,207,142,0.1); }
+
+    /* Draft */
+    .runes {
+      display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 14px; margin-top: 8px;
+    }
+    .card {
+      background: #12121b; border: 1px solid rgba(255,255,255,0.06); border-radius: 18px; padding: 14px;
+    }
+    .tree { display: flex; gap: 16px; }
+    .col { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .ks {
+      width: 64px; height: 64px; border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #ffb454, #7c3a00);
+      box-shadow: 0 0 0 3px #0b0e16, 0 0 0 5px var(--gold);
+    }
+    .rune {
+      width: 36px; height: 36px; border-radius: 50%; background: #1c2230;
+      border: 2px solid rgba(255,255,255,0.12);
+    }
+    .rune.on { border-color: var(--violet); background: #2a2150; }
+    .send {
+      margin-top: 14px; display: flex; align-items: center; gap: 8px;
+      background: var(--violet); color: #fff; border: 0; border-radius: 10px;
+      padding: 10px 14px; font-weight: 700; font-size: 13px;
+    }
+    .picks { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .picks img, .sq {
+      width: 52px; height: 52px; border-radius: 10px; object-fit: cover;
+      border: 2px solid transparent; background: #1a1f2c;
+    }
+    .picks img.on { border-color: var(--violet); }
+
+    /* Spectate slices */
+    .match { background: #12121b; border: 1px solid rgba(255,255,255,0.06); border-radius: 16px; padding: 12px 14px; margin-bottom: 12px; }
+    .meta { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+    .live { color: #ff8a3d; font-weight: 800; letter-spacing: 0.08em; }
+    .teams { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: end; }
+    .team { display: flex; }
+    .team.red { justify-content: flex-end; }
+    .slice {
+      width: 72px; height: 88px; margin-left: -10px; transform: skewX(-9deg);
+      overflow: hidden; background: #14151c; box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+    }
+    .team .slice:first-child { margin-left: 0; }
+    .slice img {
+      width: 148%; height: 124%; margin: -8% 0 0 -24%; object-fit: cover; object-position: 50% 18%;
+      transform: skewX(9deg); filter: saturate(0.75) brightness(0.82); display: block;
+    }
+    .slice.pro { box-shadow: 0 0 0 1px rgba(150,196,255,0.35), 0 8px 18px #000; }
+    .slice.pro img { filter: saturate(1) brightness(0.95); }
+    .vs { font-family: "Space Grotesk", sans-serif; font-size: 12px; color: var(--muted); padding-bottom: 36px; }
+
+    /* Replays */
+    .rec {
+      display: flex; align-items: center; gap: 8px; font-size: 13px; color: #ff8da3; margin-bottom: 14px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4d6d; animation: pulse 1s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: 0.35; } }
+    .clips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .clip { position: relative; border-radius: 14px; overflow: hidden; height: 210px; background: #12121b; }
+    .clip img { width: 100%; height: 100%; object-fit: cover; filter: saturate(0.8) brightness(0.7); }
+    .clip span {
+      position: absolute; left: 10px; bottom: 10px; right: 10px;
+      font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 16px;
+      text-shadow: 0 2px 8px #000;
+    }
+    .clip em { position: absolute; top: 10px; left: 10px; font-style: normal; font-size: 11px;
+      background: rgba(0,0,0,0.55); padding: 4px 8px; border-radius: 8px; }
+
+    /* Dashboard */
+    .dash { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+    .rank {
+      height: 280px; border-radius: 18px; background: #12121b;
+      border: 1px solid rgba(255,255,255,0.06); display: grid; place-items: center; text-align: center;
+    }
+    .ring {
+      width: 140px; height: 140px; border-radius: 50%;
+      background: conic-gradient(#7c5cff 0 72%, #1a1f2c 0);
+      display: grid; place-items: center;
+    }
+    .ring b { width: 108px; height: 108px; border-radius: 50%; background: #12121b; display: grid; place-items: center;
+      font-family: "Space Grotesk", sans-serif; font-size: 22px; }
+    .games { display: flex; flex-direction: column; gap: 8px; }
+    .game { display: flex; gap: 10px; align-items: center; background: #12121b; border-radius: 12px; padding: 8px 10px; }
+    .game img { width: 40px; height: 40px; border-radius: 8px; }
+    .w { color: #3ecf8e; font-weight: 800; font-size: 12px; }
+    .l { color: #ff5c68; font-weight: 800; font-size: 12px; }
+
+    /* Collections */
+    .skins { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+    .skin { height: 168px; border-radius: 12px; overflow: hidden; position: relative; background: #12121b; }
+    .skin img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+    .skin b { position: absolute; bottom: 8px; left: 8px; font-size: 11px; text-shadow: 0 1px 6px #000; }
+    .stats { display: flex; gap: 18px; margin: 8px 0 14px; font-size: 13px; color: var(--muted); }
+    .stats strong { color: var(--gold); }
+
+    .end { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+    .hint {
+      position: absolute; right: 16px; bottom: 14px; z-index: 21;
+      font-size: 11px; color: rgba(255,255,255,0.4);
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div class="frame" id="frame">
+      <section class="scene logo-scene" id="logo" style="background-image:url('sting-bg.png')">
+        <div class="wisps"></div>
+        <div class="logo-lock">
+          <img src="logo.png" alt="" />
+          <h1>RIFT.LOL</h1>
+          <p>DESKTOP APP</p>
+        </div>
+        <svg class="hand" viewBox="0 0 32 32" fill="#fff"><path d="M8 14v10a3 3 0 0 0 3 3h7.2a3 3 0 0 0 2.8-2l2.6-7.2c.3-.9-.3-1.8-1.2-1.8H18v-4.2c0-1.3-.8-2.3-2-2.3s-2 1-2 2.3V14H8Z"/></svg>
+      </section>
+
+      <section class="scene" id="draft">
+        <div class="ken">
+          <div class="app">
+            <div class="bar"><img src="logo.png" alt="" /><b>Rift.lol</b> · Draft<div class="dots"><i></i><i></i><i></i></div></div>
+            <div class="body">
+              <aside class="side">
+                <div class="g">Rift App</div>
+                <span>Dashboard</span>
+                <span class="on">Draft</span>
+                <span>Replays</span>
+                <span>Spectate</span>
+                <span>Collections</span>
+                <span>Overlays <i class="soon">Soon</i></span>
+              </aside>
+              <div class="main">
+                <div class="row"><h2>Draft</h2><span class="pill" style="margin-left:12px">Live</span></div>
+                <p class="sub">Runes and items from real games. Send them into League from the runes card.</p>
+                <div class="runes">
+                  <div class="card">
+                    <div class="tree">
+                      <div class="col"><div class="ks"></div><div class="rune on"></div><div class="rune on"></div><div class="rune"></div></div>
+                      <div class="col" style="margin-top:28px"><div class="rune on"></div><div class="rune"></div><div class="rune on"></div></div>
+                      <div class="col" style="margin-top:48px"><div class="rune on"></div><div class="rune"></div><div class="rune"></div></div>
+                    </div>
+                    <button class="send">Send to League</button>
+                  </div>
+                  <div class="card">
+                    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Your pick · Ahri</div>
+                    <div class="picks">
+                      <img class="on" src="https://ddragon.leagueoflegends.com/cdn/14.16.1/img/champion/Ahri.png" alt="" />
+                      <img src="https://ddragon.leagueoflegends.com/cdn/14.16.1/img/champion/Orianna.png" alt="" />
+                      <img src="https://ddragon.leagueoflegends.com/cdn/14.16.1/img/champion/Syndra.png" alt="" />
+                      <img src="https://ddragon.leagueoflegends.com/cdn/14.16.1/img/champion/Azir.png" alt="" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="stamp">Draft</div>
+      </section>
+
+      <section class="scene" id="spectate">
+        <div class="ken">
+          <div class="app">
+            <div class="bar"><img src="logo.png" alt="" /><b>Rift.lol</b> · Spectate<div class="dots"><i></i><i></i><i></i></div></div>
+            <div class="body">
+              <aside class="side">
+                <div class="g">Rift App</div>
+                <span>Draft</span>
+                <span>Replays</span>
+                <span class="on">Spectate</span>
+                <span>Collections</span>
+              </aside>
+              <div class="main">
+                <h2>Spectate</h2>
+                <p class="sub">Live Challenger and Grandmaster on EUW, KR, and NA. Launch from League’s home screen.</p>
+                <div class="match">
+                  <div class="meta"><span class="live">EUW</span> · Ranked Solo · 12:41 · Challenger 1084 LP</div>
+                  <div class="teams">
+                    <div class="team">
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aatrox_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/LeeSin_0.jpg" alt="" /></div>
+                      <div class="slice pro"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yone_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Jinx_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Thresh_0.jpg" alt="" /></div>
+                    </div>
+                    <div class="vs">VS</div>
+                    <div class="team red">
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Renekton_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Vi_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/KaiSa_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Nautilus_0.jpg" alt="" /></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="match">
+                  <div class="meta"><span class="live">KR</span> · Ranked Solo · 08:06 · Grandmaster 612 LP</div>
+                  <div class="teams">
+                    <div class="team">
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Garen_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Viego_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Azir_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zeri_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Rakan_0.jpg" alt="" /></div>
+                    </div>
+                    <div class="vs">VS</div>
+                    <div class="team red">
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Camille_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Graves_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Syndra_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aphelios_0.jpg" alt="" /></div>
+                      <div class="slice"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Bard_0.jpg" alt="" /></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="stamp">Spectate</div>
+      </section>
+
+      <section class="scene" id="replays" data-len="long">
+        <div class="ken">
+          <div class="app">
+            <div class="bar"><img src="logo.png" alt="" /><b>Rift.lol</b> · Replays<div class="dots"><i></i><i></i><i></i></div></div>
+            <div class="body">
+              <aside class="side">
+                <div class="g">Rift App</div>
+                <span>Draft</span>
+                <span class="on">Replays</span>
+                <span>Spectate</span>
+                <span>Collections</span>
+              </aside>
+              <div class="main">
+                <h2>Replays <span style="color:var(--muted);font-size:14px">Beta</span></h2>
+                <p class="sub">If the app is open, it records the match. Clips cut on your kills, Baron, drakes, towers, and double through penta.</p>
+                <div class="rec"><i class="dot"></i> Recording Ahri · 21:18 · League of Legends (TM) Client</div>
+                <div class="clips">
+                  <div class="clip"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_0.jpg" alt="" /><em>21:18</em><span>Penta kill</span></div>
+                  <div class="clip"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/BaronNashor_0.jpg" alt="" onerror="this.src='https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Mordekaiser_0.jpg'" /><em>18:02</em><span>Baron</span></div>
+                  <div class="clip"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/AurelionSol_0.jpg" alt="" /><em>14:40</em><span>Infernal Drake</span></div>
+                  <div class="clip"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Jinx_0.jpg" alt="" /><em>11:05</em><span>Tower</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="stamp">Replays</div>
+      </section>
+
+      <section class="scene" id="dash">
+        <div class="ken">
+          <div class="app">
+            <div class="bar"><img src="logo.png" alt="" /><b>Rift.lol</b> · Dashboard<div class="dots"><i></i><i></i><i></i></div></div>
+            <div class="body">
+              <aside class="side">
+                <div class="g">Rift Core</div>
+                <span class="on">Dashboard</span>
+                <span>History</span>
+                <span>Leaderboard</span>
+                <span>Live Status</span>
+              </aside>
+              <div class="main">
+                <h2>Dashboard</h2>
+                <p class="sub">Your ranked history, live game, and last matches — only numbers Riot actually returns.</p>
+                <div class="dash">
+                  <div class="rank">
+                    <div>
+                      <div class="ring"><b>LP</b></div>
+                      <div style="margin-top:12px;font-weight:700">Ranked Solo</div>
+                      <div style="color:var(--muted);font-size:12px;margin-top:4px">Pulled from your linked Riot ID</div>
+                    </div>
+                  </div>
+                  <div class="games">
+                    <div class="game"><img src="https://ddragon.leagueoflegends.com/cdn/14.16.1/img/champion/Ahri.png" alt="" /><div><b>Ahri</b><div style="font-size:12px;color:var(--muted)">8/3/11 · 28:14</div></div><span class="w" style="margin-left:auto">WIN</span></div>
+                    <div class="game"><img src="https://ddragon.leagueoflegends.com/cdn/14.16.1/img/champion/Yone.png" alt="" /><div><b>Yone</b><div style="font-size:12px;color:var(--muted)">4/7/6 · 31:02</div></div><span class="l" style="margin-left:auto">LOSS</span></div>
+                    <div class="game"><img src="https://ddragon.leagueoflegends.com/cdn/14.16.1/img/champion/Orianna.png" alt="" /><div><b>Orianna</b><div style="font-size:12px;color:var(--muted)">2/1/14 · 24:51</div></div><span class="w" style="margin-left:auto">WIN</span></div>
+                    <div class="game"><img src="https://ddragon.leagueoflegends.com/cdn/14.16.1/img/champion/Syndra.png" alt="" /><div><b>Syndra</b><div style="font-size:12px;color:var(--muted)">11/4/7 · 33:19</div></div><span class="w" style="margin-left:auto">WIN</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="stamp">Dashboard</div>
+      </section>
+
+      <section class="scene" id="col">
+        <div class="ken">
+          <div class="app">
+            <div class="bar"><img src="logo.png" alt="" /><b>Rift.lol</b> · Collections<div class="dots"><i></i><i></i><i></i></div></div>
+            <div class="body">
+              <aside class="side">
+                <div class="g">Rift App</div>
+                <span>Spectate</span>
+                <span class="on">Collections</span>
+              </aside>
+              <div class="main">
+                <h2>Collections</h2>
+                <div class="stats"><span>Skins from the <strong>League client</strong></span><span>Value in <strong>RP</strong></span></div>
+                <div class="skins">
+                  <div class="skin"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_14.jpg" alt="" /><b>Star Guardian Ahri</b></div>
+                  <div class="skin"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Yasuo_9.jpg" alt="" /><b>Nightbringer Yasuo</b></div>
+                  <div class="skin"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Jinx_13.jpg" alt="" /><b>Arcane Jinx</b></div>
+                  <div class="skin"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Thresh_5.jpg" alt="" /><b>Dark Star Thresh</b></div>
+                  <div class="skin"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/LeeSin_11.jpg" alt="" /><b>God Fist Lee Sin</b></div>
+                  <div class="skin"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lux_7.jpg" alt="" /><b>Elementalist Lux</b></div>
+                  <div class="skin"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ezreal_5.jpg" alt="" /><b>Pulsefire Ezreal</b></div>
+                  <div class="skin"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/MissFortune_16.jpg" alt="" /><b>Gun Goddess MF</b></div>
+                  <div class="skin"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aatrox_7.jpg" alt="" /><b>Blood Moon Aatrox</b></div>
+                  <div class="skin"><img src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_27.jpg" alt="" /><b>Spirit Blossom Ahri</b></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="stamp">Collection</div>
+      </section>
+
+      <section class="scene" id="end" data-len="end">
+        <div class="ken">
+          <img class="end" src="end-card.png" alt="Rift.lol Beta is live" />
+        </div>
+      </section>
+
+      <div class="progress" id="bar"><i></i></div>
+      <div class="hint">F11 full screen · R replay</div>
+    </div>
+  </div>
+  <script>
+    const BEATS = [
+      { id: 'logo', at: 0 },
+      { id: 'draft', at: 5.2 },
+      { id: 'spectate', at: 10.0 },
+      { id: 'replays', at: 15.05 },
+      { id: 'dash', at: 22.5 },
+      { id: 'col', at: 26.6 },
+      { id: 'end', at: 32.0 },
+    ];
+    const TOTAL = 43.5;
+    let t0 = 0;
+    let timer;
+
+    function show(id) {
+      document.querySelectorAll('.scene').forEach((el) => el.classList.remove('is-on'));
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.remove('is-on');
+      void el.offsetWidth;
+      el.classList.add('is-on');
+    }
+
+    function tick() {
+      if (window.__hold) return;
+      const t = (performance.now() - t0) / 1000;
+      let id = BEATS[0].id;
+      for (const b of BEATS) if (t >= b.at) id = b.id;
+      const on = document.querySelector('.scene.is-on');
+      if (!on || on.id !== id) show(id);
+      if (t >= TOTAL) {
+        cancelAnimationFrame(timer);
+        return;
+      }
+      timer = requestAnimationFrame(tick);
+    }
+
+    window.showScene = (id) => {
+      window.__hold = true;
+      cancelAnimationFrame(timer);
+      show(id);
+    };
+
+    function play() {
+      window.__hold = false;
+      cancelAnimationFrame(timer);
+      const bar = document.getElementById('bar');
+      bar.classList.remove('is-run');
+      void bar.offsetWidth;
+      bar.classList.add('is-run');
+      t0 = performance.now();
+      show('logo');
+      timer = requestAnimationFrame(tick);
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'r' || e.key === 'R' || e.key === ' ') { e.preventDefault(); play(); }
+    });
+    document.getElementById('frame').addEventListener('click', play);
+    play();
+  </script>
+</body>
+</html>

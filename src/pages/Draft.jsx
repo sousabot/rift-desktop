@@ -59,11 +59,11 @@ function kitMix(info) {
   return { ad: Math.round((ad / sum) * 100), ap: Math.round((ap / sum) * 100) };
 }
 const COMP_ROWS = [
-  ['early', 'Early game'],
-  ['mid', 'Mid game'],
-  ['late', 'Late game'],
-  ['taken', 'Damage taken'],
-  ['dealt', 'Damage dealt'],
+  ['early', 'draft.early'],
+  ['mid', 'draft.mid'],
+  ['late', 'draft.late'],
+  ['taken', 'draft.taken'],
+  ['dealt', 'draft.dealt'],
 ];
 
 function phaseLabel(phase) {
@@ -223,6 +223,9 @@ export default function Draft() {
   }, []);
 
   const live = !!session?.inSelect;
+  const replay = !live && (session?.source === 'last-draft' || session?.reason === 'last-draft')
+    && ((session?.allies || []).length + (session?.enemies || []).length) > 0;
+  const viewing = live || replay;
   const you = session?.you || null;
 
   useEffect(() => {
@@ -230,22 +233,22 @@ export default function Draft() {
   }, [you?.cellId, session?.inSelect, session?.source]);
 
   const activeRole = role;
-  const enemies = live ? (session.enemies || []).map((s) => enrichSeat(s, catalog)) : [];
-  const allies = live ? (session.allies || []).map((s) => enrichSeat(s, catalog)) : [];
-  const enemyLane = live
+  const enemies = viewing ? (session.enemies || []).map((s) => enrichSeat(s, catalog)) : [];
+  const allies = viewing ? (session.allies || []).map((s) => enrichSeat(s, catalog)) : [];
+  const enemyLane = viewing
     ? enemies.find((e) => e.position === activeRole && e.shownId)
       || enemies.find((e) => e.shownId && typicalLane(e.name) === activeRole)
       || null
     : null;
-  const allyDuo = live
+  const allyDuo = viewing
     ? allies.find((a) => !a.isYou && a.position === DUO_ROLE[activeRole] && a.shownId) || null
     : null;
 
-  const youChamp = live && (you?.championId || you?.intentId || you?.shownId)
+  const youChamp = viewing && (you?.championId || you?.intentId || you?.shownId)
     ? catalog.find((c) => c.id === (you.championId || you.intentId || you.shownId))
     : null;
 
-  const lockedIn = live && Number(you?.championId) > 0;
+  const lockedIn = viewing && Number(you?.championId) > 0;
   const banPhase = live && isBanPhase(session);
 
   useEffect(() => {
@@ -268,23 +271,23 @@ export default function Draft() {
     youChamp,
     enemyLane: enemyLane ? { name: enemyLane.key || enemyLane.name, tags: enemyLane.tags || [] } : null,
     allyDuo: allyDuo ? { name: allyDuo.name || allyDuo.key, tags: allyDuo.tags || [] } : null,
-    enemies: live ? enemies.filter((e) => e.name).map((e) => ({ name: e.name, tags: e.tags || [] })) : [],
-    bans: live ? banIds(session) : [],
-    taken: live ? [...allies, ...enemies].map((p) => p.championId).filter(Boolean) : [],
+    enemies: viewing ? enemies.filter((e) => e.name).map((e) => ({ name: e.name, tags: e.tags || [] })) : [],
+    bans: viewing ? banIds(session) : [],
+    taken: viewing ? [...allies, ...enemies].map((p) => p.championId).filter(Boolean) : [],
     owned: live ? session.owned : catalog.map((c) => c.id),
     pickable: live ? session.pickable : [],
     catalog,
     pool,
     offMeta,
-  }), [live, activeRole, youChamp, enemyLane, allyDuo, enemies, allies, session, catalog, pool, offMeta]);
+  }), [live, viewing, activeRole, youChamp, enemyLane, allyDuo, enemies, allies, session, catalog, pool, offMeta]);
 
   const banAdvice = useMemo(() => adviseBans({
     role: activeRole,
-    bans: live ? banIds(session) : [],
+    bans: viewing ? banIds(session) : [],
     bannable: live ? (session.bannable || []) : [],
     catalog,
     pool,
-  }), [activeRole, live, session, catalog, pool]);
+  }), [activeRole, live, viewing, session, catalog, pool]);
 
   const suggestions = useMemo(() => {
     const rows = banPhase ? banAdvice : advice.picks;
@@ -298,18 +301,18 @@ export default function Draft() {
   const sketch = useMemo(() => compareSketch(allyBoard, enemyBoard), [allyBoard, enemyBoard]);
 
   const lockedName = lockedIn ? youChamp?.key : null;
-  const runeFocus = live ? (lockedName || focusKey || youChamp?.key || advice.picks[0]?.key) : null;
+  const runeFocus = viewing ? (lockedName || focusKey || youChamp?.key || advice.picks[0]?.key) : null;
   const pickChamp = catalog.find((c) => c.key === runeFocus) || youChamp || null;
   const pickGrade = matchupGrade(pickChamp, enemyLane, activeRole);
   const runePages = useMemo(() => {
     if (!runeFocus) return [];
     return runePagesFor(runeFocus, activeRole, {
       enemyLane: enemyLane ? { name: enemyLane.key || enemyLane.name, tags: enemyLane.tags || [] } : null,
-      enemies: live
+      enemies: viewing
         ? enemies.filter((e) => e.name).map((e) => ({ name: e.name, tags: e.tags || [] }))
         : [],
     });
-  }, [runeFocus, activeRole, enemyLane, enemies, live, runeTick]);
+  }, [runeFocus, activeRole, enemyLane, enemies, live, viewing, runeTick]);
   const runes = runePages.find((p) => p.id === runeOption) || runePages.find((p) => p.recommended) || runePages[0];
 
   useEffect(() => {
@@ -379,17 +382,21 @@ export default function Draft() {
       : (result.error || 'Could not lock that champion.'));
   };
 
+  const inGame = session?.source === 'in-game'
+    || String(session?.gameflow || '').toUpperCase().includes('INPROGRESS');
   const status = live
     ? 'In champ select'
-    : session?.source === 'in-game' || String(session?.gameflow || '').toUpperCase().includes('INPROGRESS')
-      ? 'In game'
-      : session?.connected
-        ? 'Waiting'
-        : 'League closed';
+    : replay
+      ? (inGame ? t('draft.inGame') : t('draft.lastDraft'))
+      : inGame
+        ? t('draft.inGame')
+        : session?.connected
+          ? 'Waiting'
+          : 'League closed';
 
-  const waitCopy = !session?.connected
+  const waitCopy = !session?.connected && !replay
     ? { title: t('draft.waitTitle'), body: t('draft.waitBody') }
-    : session?.source === 'in-game' || String(session?.gameflow || '').toUpperCase().includes('INPROGRESS')
+    : inGame && !replay
       ? { title: t('draft.inGame'), body: t('draft.inGameBody') }
       : { title: t('draft.waitTitle'), body: t('draft.waitQueue') };
 
@@ -401,23 +408,25 @@ export default function Draft() {
           <p className="dr-sub">
             {live
               ? `${banPhase ? t('draft.banPhase') : phaseLabel(session.phase)} · ${activeRole}${allyDuo?.displayName ? ` · duo ${allyDuo.displayName}` : ''}`
-              : waitCopy.body}
+              : replay
+                ? t('draft.lastDraftBody')
+                : waitCopy.body}
           </p>
         </div>
-        <div className={`dr-pill${live ? ' is-live' : session?.connected ? ' is-idle' : ''}`}>
+        <div className={`dr-pill${live ? ' is-live' : replay || session?.connected ? ' is-idle' : ''}`}>
           {status}
         </div>
       </div>
 
       {catalogError ? <p className="dr-hint">{catalogError}</p> : null}
 
-      {!live ? (
+      {!viewing ? (
         <div className="dr-wait">
           <strong>{waitCopy.title}</strong>
           <p>{waitCopy.body}</p>
         </div>
       ) : (
-        <div className="dr-live">
+        <div className={`dr-live${replay ? ' is-replay' : ''}`}>
           <DraftBoard
             allyBans={session.allyBans}
             enemyBans={session.enemyBans}
@@ -428,55 +437,57 @@ export default function Draft() {
             sketch={sketch}
           />
 
-          <section className="dr-your">
-            {lockedIn ? (
-              <>
-                <div className="dr-your-head">
-                  <h2>{t('draft.yourPick')}</h2>
-                </div>
-                <Loadout
-                  pickChamp={pickChamp}
-                  pickGrade={pickGrade}
+          {(live || lockedIn) ? (
+            <section className="dr-your">
+              {lockedIn ? (
+                <>
+                  <div className="dr-your-head">
+                    <h2>{t('draft.yourPick')}</h2>
+                  </div>
+                  <Loadout
+                    pickChamp={pickChamp}
+                    pickGrade={pickGrade}
+                    activeRole={activeRole}
+                    roles={ROLES}
+                    onRole={(r) => { setRole(r); setRoleLocked(true); }}
+                    runePages={runePages}
+                    runes={runes}
+                    onRune={setRuneOption}
+                    runesImported={runesImported}
+                    spellsImported={spellsImported}
+                    trees={trees}
+                    kit={kit}
+                    sending={sending}
+                    onSend={sendRunes}
+                    runeMsg={runeMsg}
+                    disclaimer={advice.disclaimer}
+                    proChamp={pickChamp?.name}
+                  />
+                </>
+              ) : (
+                <PickSuggestions
+                  title={t('draft.yourPick')}
+                  banPhase={banPhase}
+                  suggestions={suggestions}
+                  featured={featured}
+                  enemyLane={enemyLane}
                   activeRole={activeRole}
-                  roles={ROLES}
-                  onRole={(r) => { setRole(r); setRoleLocked(true); }}
-                  runePages={runePages}
-                  runes={runes}
-                  onRune={setRuneOption}
-                  runesImported={runesImported}
-                  spellsImported={spellsImported}
-                  trees={trees}
-                  kit={kit}
-                  sending={sending}
-                  onSend={sendRunes}
-                  runeMsg={runeMsg}
+                  masteryOnly={masteryOnly}
+                  offMeta={offMeta}
+                  hasMastery={hasMastery}
+                  canAct={canAct}
+                  pickMsg={pickMsg}
+                  onMastery={() => setMasteryOnly((v) => !v)}
+                  onOffMeta={() => setOffMeta((v) => !v)}
+                  onHover={hoverChamp}
+                  onLock={() => lockChamp(featured)}
+                  pool={pool}
                   disclaimer={advice.disclaimer}
-                  proChamp={pickChamp?.name}
+                  proChamp={featured?.name}
                 />
-              </>
-            ) : (
-              <PickSuggestions
-                title={t('draft.yourPick')}
-                banPhase={banPhase}
-                suggestions={suggestions}
-                featured={featured}
-                enemyLane={enemyLane}
-                activeRole={activeRole}
-                masteryOnly={masteryOnly}
-                offMeta={offMeta}
-                hasMastery={hasMastery}
-                canAct={canAct}
-                pickMsg={pickMsg}
-                onMastery={() => setMasteryOnly((v) => !v)}
-                onOffMeta={() => setOffMeta((v) => !v)}
-                onHover={hoverChamp}
-                onLock={() => lockChamp(featured)}
-                pool={pool}
-                disclaimer={advice.disclaimer}
-                proChamp={featured?.name}
-              />
-            )}
-          </section>
+              )}
+            </section>
+          ) : null}
         </div>
       )}
     </div>
@@ -918,8 +929,8 @@ function DraftBoard({ bans, allyBans, enemyBans, allies, enemies, lean, sketch }
       <div className="dr-board">
         <TeamStrip seats={allies} others={enemies} />
         <div className="dr-comps">
-          {COMP_ROWS.map(([key, label]) => (
-            <CompRow key={key} label={label} row={sketch[key]} />
+          {COMP_ROWS.map(([key, labelKey]) => (
+            <CompRow key={key} labelKey={labelKey} row={sketch[key]} />
           ))}
         </div>
         <TeamStrip seats={enemies} others={allies} enemy />
@@ -1007,14 +1018,25 @@ function LeanBar({ lean, allyBans, enemyBans }) {
   );
 }
 
-function CompRow({ label, row }) {
+function CompRow({ labelKey, row }) {
+  const { t } = useI18n();
+  const ally = Number(row?.ally) || 0;
+  const enemy = Number(row?.enemy) || 0;
+  const ready = Boolean(row?.ready);
+  const allyLead = ready && ally > enemy;
+  const enemyLead = ready && enemy > ally;
   return (
-    <div className={`dr-comp${row.ready ? '' : ' is-wait'}`}>
-      <span>{label}</span>
-      <div className="dr-comp-track">
-        <i className="is-ally" style={{ width: `${row.ally}%` }} />
-        <i className="is-enemy" style={{ width: `${row.enemy}%` }} />
+    <div className={`dr-comp${ready ? '' : ' is-wait'}${allyLead ? ' is-ally-lead' : ''}${enemyLead ? ' is-enemy-lead' : ''}`} title={t('draft.compHint')}>
+      <b className={`is-ally${allyLead ? ' is-ahead' : ''}`}>{ready ? `${ally}%` : '—'}</b>
+      <div className="dr-comp-mid">
+        <span>{t(labelKey)}</span>
+        <div className="dr-comp-track">
+          <i className={`is-ally${allyLead ? ' is-lead' : ''}`} style={{ width: `${ready ? ally : 50}%` }} />
+          <i className={`is-enemy${enemyLead ? ' is-lead' : ''}`} style={{ width: `${ready ? enemy : 50}%` }} />
+          <em className="dr-comp-midline" aria-hidden />
+        </div>
       </div>
+      <b className={`is-enemy${enemyLead ? ' is-ahead' : ''}`}>{ready ? `${enemy}%` : '—'}</b>
     </div>
   );
 }
