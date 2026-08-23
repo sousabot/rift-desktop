@@ -141,7 +141,12 @@ async function loadChampMaps() {
 }
 
 function nameOf(maps, cid) {
-  return maps.byKey[String(cid)] || maps.byId[String(cid)] || null;
+  return maps.byId[String(cid)] || maps.byKey[String(cid)] || null;
+}
+
+/** Blend overall (d1) and lane (d2) so lane counters land in the right bucket. */
+function matchupScore(row) {
+  return Number(row.d1) + Number(row.d2) * 2;
 }
 
 function rankOptions(rows, totalGames) {
@@ -199,15 +204,17 @@ function coreOptions(rows) {
 
 function laneLabel(d2) {
   const v = Number(d2) || 0;
-  if (v >= 4) return 'good';
-  if (v <= -4) return 'bad';
+  if (v >= 3) return 'good';
+  if (v <= -2) return 'bad';
   return 'avg';
 }
 
 function matchupRows(list, maps, kind) {
   const sorted = [...(list || [])].sort((a, b) => {
-    if (kind === 'good') return Number(b.d1) - Number(a.d1);
-    return Number(a.d1) - Number(b.d1) || Number(a.vsWr) - Number(b.vsWr);
+    if (kind === 'good') {
+      return matchupScore(b) - matchupScore(a) || Number(b.d1) - Number(a.d1);
+    }
+    return matchupScore(a) - matchupScore(b) || Number(a.vsWr) - Number(b.vsWr);
   });
   return sorted.slice(0, 24).map((row) => ({
     champion: nameOf(maps, row.cid),
@@ -222,28 +229,37 @@ function matchupRows(list, maps, kind) {
   })).filter((row) => row.champion);
 }
 
-function pickGoodMatchups(ranked, maps) {
-  const positive = ranked.filter((row) => Number(row.d1) > 0);
-  const pool = positive.length ? positive : ranked;
-  const sorted = [...pool].sort((a, b) => Number(b.d1) - Number(a.d1));
+function pickGoodMatchups(ranked, maps, stats) {
+  const weak = new Set(stats?.counters?.weak || []);
+  const strong = new Set(stats?.counters?.strong || []);
+  const sorted = [...ranked]
+    .filter((row) => !weak.has(row.cid))
+    .sort((a, b) => {
+      const scoreA = strong.has(a.cid) ? 1000 + matchupScore(a) : matchupScore(a);
+      const scoreB = strong.has(b.cid) ? 1000 + matchupScore(b) : matchupScore(b);
+      return scoreB - scoreA || Number(b.d1) - Number(a.d1);
+    })
+    .filter((row) => strong.has(row.cid) || matchupScore(row) > 0 || Number(row.d1) > 0);
   return matchupRows(sorted, maps, 'good');
 }
 
-function pickBadMatchups(ranked, maps, stats) {
-  const weakIds = new Set(stats?.counters?.weak || []);
-  const goodTop = new Set(
-    [...ranked].sort((a, b) => Number(b.d1) - Number(a.d1)).slice(0, 5).map((row) => row.cid),
+function pickBadMatchups(ranked, maps, stats, goodRows) {
+  const weak = new Set(stats?.counters?.weak || []);
+  const strong = new Set(stats?.counters?.strong || []);
+  const goodCids = new Set((goodRows || []).map((row) => row.cid));
+  const sorted = [...ranked]
+    .filter((row) => !goodCids.has(row.cid) && !strong.has(row.cid))
+    .sort((a, b) => {
+      const scoreA = weak.has(a.cid) ? -1000 + matchupScore(a) : matchupScore(a);
+      const scoreB = weak.has(b.cid) ? -1000 + matchupScore(b) : matchupScore(b);
+      return scoreA - scoreB || Number(a.vsWr) - Number(b.vsWr);
+    });
+  const candidates = sorted.filter(
+    (row) => weak.has(row.cid) || matchupScore(row) < 0 || Number(row.vsWr) < 50,
   );
-  const sorted = [...ranked].sort((a, b) => {
-    const aWeak = weakIds.has(a.cid) ? 0 : 1;
-    const bWeak = weakIds.has(b.cid) ? 0 : 1;
-    if (aWeak !== bWeak) return aWeak - bWeak;
-    return Number(a.d1) - Number(b.d1) || Number(a.vsWr) - Number(b.vsWr);
-  });
-  const negative = sorted.filter((row) => Number(row.d1) < 0 && !goodTop.has(row.cid));
-  const pool = negative.length >= 5
-    ? negative
-    : sorted.filter((row) => !goodTop.has(row.cid));
+  const pool = candidates.length >= 5
+    ? candidates
+    : sorted.slice(0, 24);
   return matchupRows(pool, maps, 'bad');
 }
 
@@ -258,7 +274,7 @@ async function fetchChampionDetail({
 
   const lane = LANE[role] || 'middle';
   const region = PLATFORM_REGION[String(platform || '').toLowerCase()] || '';
-  const key = `${slug}|${lane}|${rank}|${region}`;
+  const key = `${slug}|${lane}|${rank}|${region}|mu2`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.data;
 
@@ -287,9 +303,11 @@ async function fetchChampionDetail({
           ...row,
           champion: nameOf(maps, row.cid),
         })).filter((row) => row.champion);
+        const laneStats = json.stats || stats;
+        const good = pickGoodMatchups(ranked, maps, laneStats);
         return [key, {
-          good: pickGoodMatchups(ranked, maps),
-          bad: pickBadMatchups(ranked, maps, json.stats || stats),
+          good,
+          bad: pickBadMatchups(ranked, maps, laneStats, good),
         }];
       }),
     );
