@@ -261,17 +261,24 @@ export default function LiveStatus() {
   };
   const label = lookup.gameName ? `${lookup.gameName}#${lookup.tagLine || ''}` : null;
 
+  const checkSeq = useRef(0);
+
   const check = async ({ silent = false } = {}) => {
     if (!lookup.gameName) { setLoading(false); setGame(null); return; }
+    const seq = ++checkSeq.current;
     if (!silent) setLoading(true);
     try {
       const data = await getLiveGame(lookup);
+      if (seq !== checkSeq.current) return;
       setError('');
       if (hadGameRef.current && !data) {
         let ended = await getLatestMatchReview(lookup);
+        if (seq !== checkSeq.current) return;
         if (!ended) {
           await new Promise((r) => setTimeout(r, 4000));
+          if (seq !== checkSeq.current) return;
           ended = await getLatestMatchReview(lookup);
+          if (seq !== checkSeq.current) return;
         }
         if (ended) setRecap(ended);
       }
@@ -280,6 +287,7 @@ export default function LiveStatus() {
       if (data) setFetchedAt(Date.now());
       setCheckedAt(new Date());
     } catch (err) {
+      if (seq !== checkSeq.current) return;
       console.warn('[live] check failed:', err?.message || err);
       noticeFromError(err);
       setGame(null);
@@ -290,7 +298,7 @@ export default function LiveStatus() {
       );
       setCheckedAt(new Date());
     } finally {
-      if (!silent) setLoading(false);
+      if (seq === checkSeq.current && !silent) setLoading(false);
     }
   };
 
@@ -299,7 +307,11 @@ export default function LiveStatus() {
     setLaunching(false);
   }, [lookup.gameName, lookup.tagLine, lookup.platform]);
 
-  useEffect(() => { check(); /* eslint-disable-line */ }, [lookup.gameName, lookup.tagLine, lookup.platform]);
+  useEffect(() => {
+    check();
+    return () => { checkSeq.current += 1; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lookup.gameName, lookup.tagLine, lookup.platform]);
 
   useEffect(() => {
     if (!lookup.gameName) return undefined;

@@ -29,20 +29,27 @@ export default function Champions() {
     platform: session?.platform || 'euw1',
   };
 
-  const load = async (riotId, selectedMode = mode) => {
+  const load = async (riotId, selectedMode = mode, opts = {}) => {
+    const alive = () => !opts.signal?.aborted;
     if (!riotId) {
-      setProfile(null);
-      setError('');
-      setLoading(false);
+      if (alive()) {
+        setProfile(null);
+        setError('');
+        setLoading(false);
+      }
       return;
     }
-    setLoading(true);
-    setError('');
+    if (alive()) {
+      setLoading(true);
+      setError('');
+    }
     const parsed = parseRiotId(riotId, session?.tagLine || '');
     if (!parsed) {
-      setProfile(null);
-      setError(t('history.needTag'));
-      setLoading(false);
+      if (alive()) {
+        setProfile(null);
+        setError(t('history.needTag'));
+        setLoading(false);
+      }
       return;
     }
     try {
@@ -52,22 +59,26 @@ export default function Champions() {
         region: lookup.region,
         platform: lookup.platform,
         queue: MODE_QUEUE[selectedMode],
-        count: 40,
+        count: 20,
       });
+      if (!alive()) return;
       setProfile(data);
     } catch (err) {
+      if (!alive()) return;
       noticeFromError(err);
       setError(apiUserMessage(err) || 'Could not load champion stats.');
       setProfile(null);
     } finally {
-      setLoading(false);
+      if (alive()) setLoading(false);
     }
   };
 
   useEffect(() => {
-    load(activeId);
+    const ac = new AbortController();
+    load(activeId, mode, { signal: ac.signal });
+    return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, session?.platform, session?.region]);
+  }, [activeId, session?.platform, session?.region, mode]);
 
   const pool = [...(profile?.championPool || [])].sort((a, b) => {
     if (sort === 'wr') return b.wr - a.wr || b.games - a.games;
@@ -89,7 +100,7 @@ export default function Champions() {
               key={m}
               type="button"
               className={`ch-chip${m === mode ? ' is-on' : ''}`}
-              onClick={() => { setMode(m); load(activeId, m); }}
+              onClick={() => setMode(m)}
             >
               {m}
             </button>

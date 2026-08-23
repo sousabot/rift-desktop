@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSession } from '../state/SessionContext';
 import { useI18n } from '../i18n/LocaleContext';
@@ -162,6 +162,7 @@ export default function Compare() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+  const runSeq = useRef(0);
 
   const openProfile = (riotId) => {
     if (!riotId) return;
@@ -176,6 +177,7 @@ export default function Compare() {
       setError(t('compare.needIds'));
       return;
     }
+    const seq = ++runSeq.current;
     setLoading(true);
     setError('');
     try {
@@ -183,13 +185,15 @@ export default function Compare() {
         { ...leftId, region: session?.region || 'europe', platform: session?.platform || 'euw1' },
         { ...rightId, region: session?.region || 'europe', platform: session?.platform || 'euw1' },
       );
+      if (seq !== runSeq.current) return;
       setResult(data);
     } catch (err) {
+      if (seq !== runSeq.current) return;
       noticeFromError(err);
       setError(apiUserMessage(err) || t('compare.fail'));
       setResult(null);
     } finally {
-      setLoading(false);
+      if (seq === runSeq.current) setLoading(false);
     }
   };
 

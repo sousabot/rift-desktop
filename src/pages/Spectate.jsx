@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { typicalLane } from '../lib/champLane';
 import { playerSearchPath } from '../lib/playerRoute';
@@ -81,18 +81,23 @@ export default function Spectate() {
 
   const platforms = REGIONS.find((r) => r.id === region)?.platforms || 'euw1,kr,na1';
 
+  const loadSeq = useRef(0);
+
   async function load(force = false) {
     if (!api) {
       setError(t('spectate.needApp'));
       return;
     }
+    const seq = ++loadSeq.current;
     setError('');
     setPayload((prev) => ({ ...prev, scanning: true }));
     try {
       const data = await api.list({ platforms, force });
+      if (seq !== loadSeq.current) return;
       setPayload(data || { games: [] });
       if (data?.error) setError(apiUserMessage({ message: data.error }) || data.error);
     } catch (err) {
+      if (seq !== loadSeq.current) return;
       setPayload((prev) => ({ ...prev, scanning: false }));
       setError(apiUserMessage(err) || err.message || 'Could not load live games.');
     }
@@ -100,6 +105,7 @@ export default function Spectate() {
 
   useEffect(() => {
     load(false);
+    return () => { loadSeq.current += 1; };
   }, [platforms]);
 
   useEffect(() => {
@@ -300,13 +306,22 @@ export default function Spectate() {
 
 function ChampSlice({ name }) {
   const [src, setSrc] = useState(() => splashUrl(name));
-  useEffect(() => { setSrc(splashUrl(name)); }, [name]);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setSrc(splashUrl(name));
+    setFailed(false);
+  }, [name]);
+  if (failed) return <div className="sp-slice-art sp-slice-art--empty" aria-hidden />;
   return (
     <img
       className="sp-slice-art"
       src={src}
       alt=""
-      onError={() => setSrc(champLoadingUrl(name))}
+      onError={() => {
+        const fallback = champLoadingUrl(name);
+        if (src === fallback) setFailed(true);
+        else setSrc(fallback);
+      }}
     />
   );
 }

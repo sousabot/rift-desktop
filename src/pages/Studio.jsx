@@ -499,9 +499,11 @@ const DIVISIONS = ['IV', 'III', 'II', 'I'];
 const APEX_TIERS = new Set(['MASTER', 'GRANDMASTER', 'CHALLENGER']);
 
 function tierShortLabel(tier) {
-  if (tier === 'GRANDMASTER') return 'GM';
-  if (tier === 'CHALLENGER') return 'CHALL.';
-  return tier.charAt(0) + tier.slice(1).toLowerCase();
+  const t = String(tier || '');
+  if (t === 'GRANDMASTER') return 'GM';
+  if (t === 'CHALLENGER') return 'CHALL.';
+  if (!t) return '?';
+  return t.charAt(0) + t.slice(1).toLowerCase();
 }
 
 function niceAxisMax(max) {
@@ -739,7 +741,7 @@ function RankDist({ rows, totalPlayers, t }) {
           const emblem = rankImg(row.tier);
           const showEmblem = tierFirst.has(key);
           const tierMeta = byTier.find((tRow) => tRow.tier === row.tier);
-          const label = `${row.tier.charAt(0)}${row.tier.slice(1).toLowerCase()}${row.division ? ` ${row.division}` : ''}`;
+          const label = `${String(row.tier || '?').charAt(0)}${String(row.tier || '').slice(1).toLowerCase()}${row.division ? ` ${row.division}` : ''}`;
           const rankPct = totalPlayers
             ? ((row.players || 0) / totalPlayers) * 100
             : Number(row.percentOfPlatform) || 0;
@@ -913,7 +915,7 @@ export default function Studio() {
         if (activeDim === 'champion') {
           if (!row.champion) return false;
           if (view === 'souls' && soul && row.soul && row.soul !== soul) return false;
-          if (q && !row.champion.toLowerCase().includes(q)) return false;
+          if (q && !String(row.champion).toLowerCase().includes(q)) return false;
           return true;
         }
         if (activeDim === 'rank') return !!row.tierKey;

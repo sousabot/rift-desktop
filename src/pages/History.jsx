@@ -156,20 +156,27 @@ export default function History() {
   };
   const reviewPlatform = profile?.platform || sessionLookup.platform;
 
-  const load = async (riotId, selectedMode = mode) => {
+  const load = async (riotId, selectedMode = mode, opts = {}) => {
+    const alive = () => !opts.signal?.aborted;
     if (!riotId) {
-      setProfile(null);
-      setError('');
-      setLoading(false);
+      if (alive()) {
+        setProfile(null);
+        setError('');
+        setLoading(false);
+      }
       return;
     }
-    setLoading(true);
-    setError('');
+    if (alive()) {
+      setLoading(true);
+      setError('');
+    }
     const parsed = parseRiotId(riotId, session?.tagLine || '');
     if (!parsed) {
-      setProfile(null);
-      setError(t('history.needTag'));
-      setLoading(false);
+      if (alive()) {
+        setProfile(null);
+        setError(t('history.needTag'));
+        setLoading(false);
+      }
       return;
     }
     try {
@@ -179,22 +186,26 @@ export default function History() {
         region: sessionLookup.region,
         platform: sessionLookup.platform,
         queue: MODE_QUEUE[selectedMode],
-        count: 40,
+        count: 20,
       });
+      if (!alive()) return;
       setProfile(data);
     } catch (err) {
+      if (!alive()) return;
       noticeFromError(err);
       setError(apiUserMessage(err) || 'Could not load match history.');
       setProfile(null);
     } finally {
-      setLoading(false);
+      if (alive()) setLoading(false);
     }
   };
 
   useEffect(() => {
-    load(activeId);
+    const ac = new AbortController();
+    load(activeId, mode, { signal: ac.signal });
+    return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, session?.platform, session?.region]);
+  }, [activeId, session?.platform, session?.region, mode]);
 
   useEffect(() => {
     const riotId = String(activeId || '').trim();
@@ -245,7 +256,7 @@ export default function History() {
               key={m}
               type="button"
               className={`hs-chip${m === mode ? ' is-on' : ''}`}
-              onClick={() => { setMode(m); load(activeId, m); }}
+              onClick={() => setMode(m)}
             >
               {m}
             </button>

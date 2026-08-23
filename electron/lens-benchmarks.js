@@ -43,7 +43,15 @@ function readCache() {
 }
 
 function writeCache(data) {
-  fs.writeFileSync(cachePath(), JSON.stringify(data, null, 2));
+  // Pretty JSON on a large cache can stall the main process; write compact + deferred.
+  const payload = JSON.stringify(data);
+  setImmediate(() => {
+    try {
+      fs.writeFileSync(cachePath(), payload);
+    } catch (err) {
+      console.warn('[lens] cache write failed:', err?.message || err);
+    }
+  });
 }
 
 function cacheKey({ platform, role, queue }) {
