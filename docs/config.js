@@ -6,9 +6,8 @@ window.RIFT_SITE = {
   contact: 'Rift.lol',
   tagline: 'League stats, draft tools, and in-game overlays — on your PC.',
   twitter: 'RIFT_LOL_',
-  // Paste the launch giveaway tweet URL after you post (status/…).
-  // Until then, the Enter button opens the X profile.
-  giveawayPost: '',
+  // Launch giveaway tweet
+  giveawayPost: 'https://x.com/RIFT_LOL_/status/2091324952519512132',
   giveawayWinners: 8,
   giveawayAnnounce: '25 Aug 2026',
   giveawayPrize: 'Rift Premium',
