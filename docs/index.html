@@ -237,28 +237,36 @@
   </section>
 
   <section class="giveaway" id="giveaway">
-    <p class="section-kicker">Launch giveaway</p>
-    <h2 class="section-title">Win Rift Premium</h2>
-    <p class="section-sub">
-      To celebrate launch we’re giving away <strong id="giveawayWinners">8</strong>×
-      <span id="giveawayPrize">Rift Premium</span>. Follow and RT on X to enter.
-    </p>
+    <div class="giveaway-head">
+      <div>
+        <p class="section-kicker">Launch giveaway</p>
+        <h2 class="section-title">Win Rift Premium</h2>
+      </div>
+      <p class="section-sub">
+        To celebrate launch we’re giving away <strong id="giveawayWinners">8</strong>×
+        <span id="giveawayPrize">Rift Premium</span>. Follow and RT on X to enter.
+      </p>
+    </div>
 
     <div class="giveaway-panel">
       <ol class="giveaway-steps">
         <li>
-          <label class="giveaway-check">
+          <label class="giveaway-check" for="gwFollow">
             <input type="checkbox" id="gwFollow" />
-            <span>
+            <span class="giveaway-check__box" aria-hidden="true"></span>
+            <span class="giveaway-check__num" aria-hidden="true">01</span>
+            <span class="giveaway-check__copy">
               <strong>Follow <a id="gwFollowLink" href="https://x.com/RIFT_LOL_" target="_blank" rel="noopener noreferrer">@RIFT_LOL_</a></strong>
               <em>on X (Twitter)</em>
             </span>
           </label>
         </li>
         <li>
-          <label class="giveaway-check">
+          <label class="giveaway-check" for="gwRt">
             <input type="checkbox" id="gwRt" />
-            <span>
+            <span class="giveaway-check__box" aria-hidden="true"></span>
+            <span class="giveaway-check__num" aria-hidden="true">02</span>
+            <span class="giveaway-check__copy">
               <strong>RT the giveaway post</strong>
               <em>same account you followed with</em>
             </span>
@@ -267,8 +275,8 @@
       </ol>
 
       <div class="giveaway-meta">
-        <span><strong id="giveawayWinnersMeta">8</strong> winners</span>
-        <span>Announced <strong id="giveawayAnnounce">25 Aug 2026</strong></span>
+        <span class="giveaway-pill"><strong id="giveawayWinnersMeta">8</strong> winners</span>
+        <span class="giveaway-pill">Announced <strong id="giveawayAnnounce">25 Aug 2026</strong></span>
       </div>
 
       <div class="giveaway-actions">
