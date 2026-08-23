@@ -4,11 +4,12 @@
   const ver = cfg.version || '';
   const base = gh ? `https://github.com/${gh}` : '';
   const tag = ver ? `v${ver}` : 'latest';
-  const release = base ? `${base}/releases/${ver ? `tag/${tag}` : 'latest'}` : '#download';
+  const release = base ? `${base}/releases/latest` : '#download';
   const setupName = ver ? `Rift.lol-Setup-${ver}.exe` : 'Rift.lol-Setup.exe';
   const portableName = ver ? `Rift.lol-${ver}-portable.exe` : 'Rift.lol-portable.exe';
-  const setupUrl = base && ver ? `${base}/releases/download/${tag}/${setupName}` : release;
-  const portableUrl = base && ver ? `${base}/releases/download/${tag}/${portableName}` : release;
+  // Direct asset URLs 404 until the GitHub release exists — send CTAs to /releases/latest.
+  const setupUrl = release;
+  const portableUrl = release;
 
   const year = document.getElementById('year');
   if (year) year.textContent = String(new Date().getFullYear());

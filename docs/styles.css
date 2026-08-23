@@ -151,14 +151,24 @@ img { max-width: 100%; display: block; }
   margin-top: 28px;
 }
 .link-discover {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   text-decoration: none;
   color: var(--text);
+  transition: color 0.15s ease;
+}
+.link-discover__arrow {
+  display: block;
+  flex: 0 0 auto;
+  transition: transform 0.18s ease;
 }
 .link-discover:hover { color: var(--gold); }
+.link-discover:hover .link-discover__arrow { transform: translateX(3px); }
 .hero-price {
   margin: 18px 0 0;
   color: var(--muted);
