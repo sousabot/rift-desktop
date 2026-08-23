@@ -112,7 +112,7 @@ async function loadSummonerDashboard({ gameName, tagLine, region, platform, queu
       count: matchCount,
       queue: queue || undefined,
     });
-    const timelineIds = matchIds || [];
+    const timelineIds = (matchIds || []).slice(0, 10);
     const rankContextPromise = loadOpggRankContext({
       puuid: account.puuid,
       platform: resolvedPlatform,

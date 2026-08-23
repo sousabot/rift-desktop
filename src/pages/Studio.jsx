@@ -244,14 +244,7 @@ function MiniIconsPreview({ rows }) {
       {top.map((row) => {
         const id = Number(row.key ?? row.iconId);
         if (!Number.isFinite(id)) return null;
-        return (
-          <img
-            key={id}
-            src={profileIconUrl(id, version)}
-            alt=""
-            onError={(e) => { e.currentTarget.src = profileIconUrl(29, version); }}
-          />
-        );
+        return <ProfileIconThumb key={id} id={id} version={version} />;
       })}
     </div>
   );
@@ -623,6 +616,23 @@ function LpHistogram({ rows, t }) {
   );
 }
 
+function ProfileIconThumb({ id, version, className = '' }) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [id, version]);
+  if (!Number.isFinite(id) || id <= 0 || failed) {
+    return <span className={`st-icon-img is-empty ${className}`.trim()} />;
+  }
+  return (
+    <img
+      src={profileIconUrl(id, version)}
+      alt=""
+      className={`st-icon-img ${className}`.trim()}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function ProfileIcons({ rows, query, sort, t }) {
   const version = useDdragonVersion();
   const [limit, setLimit] = useState(36);
@@ -657,12 +667,7 @@ function ProfileIcons({ rows, query, sort, t }) {
       <div className="st-icons-grid">
         {visible.map((row) => (
           <div key={row.id} className="st-icon-card" title={`#${row.id}`}>
-            <img
-              src={profileIconUrl(row.id, version)}
-              alt=""
-              className="st-icon-img"
-              onError={(e) => { e.currentTarget.src = profileIconUrl(29, version); }}
-            />
+            <ProfileIconThumb id={row.id} version={version} />
             <strong>{row.count.toLocaleString()}</strong>
             <span>({Number.isFinite(row.winrate) ? `${row.winrate.toFixed(2)}%` : '—'} WR)</span>
           </div>

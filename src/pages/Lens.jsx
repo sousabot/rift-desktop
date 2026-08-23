@@ -2366,7 +2366,12 @@ export default function Lens() {
       className="ln-cat-face"
       src={profileIconUrl(profile.profileIconId, ddVersion)}
       alt=""
-      onError={(e) => { e.currentTarget.src = profileIconUrl(29, ddVersion); }}
+      onError={(e) => {
+        const el = e.currentTarget;
+        if (el.dataset.fb) { el.style.visibility = 'hidden'; return; }
+        el.dataset.fb = '1';
+        el.src = profileIconUrl(29, ddVersion);
+      }}
     />
   ) : <span className="ln-cat-face is-empty" />;
   const compareRank = <RankMark tier={compareTier} />;
@@ -2380,7 +2385,12 @@ export default function Lens() {
               className="ln-avatar"
               src={profileIconUrl(profile.profileIconId, ddVersion)}
               alt=""
-              onError={(e) => { e.currentTarget.src = profileIconUrl(29, ddVersion); }}
+              onError={(e) => {
+        const el = e.currentTarget;
+        if (el.dataset.fb) { el.style.visibility = 'hidden'; return; }
+        el.dataset.fb = '1';
+        el.src = profileIconUrl(29, ddVersion);
+      }}
             />
           ) : null}
           <div>

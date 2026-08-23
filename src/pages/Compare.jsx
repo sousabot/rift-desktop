@@ -63,7 +63,15 @@ function Side({ profile, onOpen }) {
           className="cp-avatar"
           src={profileIconUrl(profile.profileIconId, version)}
           alt=""
-          onError={(e) => { e.target.src = profileIconUrl(29, version); }}
+          onError={(e) => {
+            const el = e.currentTarget;
+            if (el.dataset.fb) {
+              el.style.visibility = 'hidden';
+              return;
+            }
+            el.dataset.fb = '1';
+            el.src = profileIconUrl(29, version);
+          }}
         />
         <div>
           <h2>{name}</h2>

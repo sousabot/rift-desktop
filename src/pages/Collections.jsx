@@ -227,7 +227,12 @@ export default function Collections() {
             className="cl-head-avatar"
             src={profileIconUrl(iconId, ddVersion)}
             alt=""
-            onError={(e) => { e.currentTarget.src = profileIconUrl(29, ddVersion); }}
+            onError={(e) => {
+              const el = e.currentTarget;
+              if (el.dataset.fb) { el.style.visibility = 'hidden'; return; }
+              el.dataset.fb = '1';
+              el.src = profileIconUrl(29, ddVersion);
+            }}
           />
         ) : null}
         <div className="cl-tabs">

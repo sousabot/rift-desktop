@@ -124,14 +124,34 @@ function StatCard({ label, value, delta, deltaDir, sparkData, hint }) {
 function ChampionIcon({ name, size = 36, enemy = false, rounded = false, team }) {
   const version = useDdragonVersion();
   const [src, setSrc] = useState(() => champIconUrl(name, version));
-  useEffect(() => { setSrc(champIconUrl(name, version)); }, [name, version]);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setSrc(champIconUrl(name, version));
+    setFailed(false);
+  }, [name, version]);
   const teamClass = team === 'blue' ? ' db-champ-icon--blue' : team === 'red' ? ' db-champ-icon--red' : '';
+  if (failed) {
+    return (
+      <span
+        className={`db-champ-icon is-empty${enemy ? ' db-champ-icon--enemy' : ''}${rounded ? ' db-champ-icon--rounded' : ''}${teamClass}`}
+        style={{ width: size, height: size, display: 'inline-block' }}
+        title={name}
+      />
+    );
+  }
   return (
     <img
       src={src}
       alt={name}
       title={name}
-      onError={() => setSrc(champIconUrl('Aatrox', version))}
+      onError={() => {
+        const fallback = champIconUrl('Aatrox', version);
+        if (src === fallback) {
+          setFailed(true);
+          return;
+        }
+        setSrc(fallback);
+      }}
       className={`db-champ-icon${enemy ? ' db-champ-icon--enemy' : ''}${rounded ? ' db-champ-icon--rounded' : ''}${teamClass}`}
       style={{ width: size, height: size }}
     />
@@ -227,6 +247,7 @@ export default function Dashboard() {
   const viewingOther = Boolean(qParam && (!ownId || qParam.toLowerCase() !== ownId.toLowerCase()));
 
   const [profile, setProfile] = useState(null);
+  const loadSeq = useRef(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [mode, setMode] = useState('Solo');
@@ -273,6 +294,7 @@ export default function Dashboard() {
       setLoading(false);
       return;
     }
+    const reqId = ++loadSeq.current;
     setLoading(true);
     setLoadError('');
     setMatchIdx(0);
@@ -280,6 +302,7 @@ export default function Dashboard() {
     setLiveGame(null);
     const parsed = parseRiotId(riotId, session?.tagLine || '');
     if (!parsed) {
+      if (reqId !== loadSeq.current) return;
       setProfile(null);
       setLoadError(t('dash.needTag'));
       setLoading(false);
@@ -294,15 +317,17 @@ export default function Dashboard() {
         queue: MODE_QUEUE[selectedMode],
         count: 20,
       });
+      if (reqId !== loadSeq.current) return;
       setProfile(data);
       rememberPlayer(data?.riotId || riotId);
     } catch (err) {
+      if (reqId !== loadSeq.current) return;
       console.error('[Dashboard] Failed to load summoner:', err);
       noticeFromError(err);
       setProfile(null);
       setLoadError(apiUserMessage(err) || t('dash.loadFail'));
     } finally {
-      setLoading(false);
+      if (reqId === loadSeq.current) setLoading(false);
     }
   };
 
@@ -572,7 +597,15 @@ export default function Dashboard() {
                     <div className="db-profile-row">
                       <div className="db-avatar-wrap" style={{ '--rc': rc }}>
                         <img src={profileIconUrl(profile.profileIconId, ddVersion)} alt="" className="db-avatar"
-                          onError={(e) => { e.target.src = profileIconUrl(29, ddVersion); }} />
+                          onError={(e) => {
+                            const el = e.currentTarget;
+                            if (el.dataset.fb) {
+                              el.style.visibility = 'hidden';
+                              return;
+                            }
+                            el.dataset.fb = '1';
+                            el.src = profileIconUrl(29, ddVersion);
+                          }} />
                         {profile.summonerLevel != null && (
                           <span className="db-avatar-level">{profile.summonerLevel}</span>
                         )}

@@ -490,6 +490,10 @@
   object-fit: cover;
   background: #0b0e16;
 }
+.st-icon-img.is-empty {
+  display: inline-block;
+  border: 1px solid rgba(255,255,255,0.08);
+}
 .st-icon-card strong {
   font-size: 14px;
   font-weight: 800;

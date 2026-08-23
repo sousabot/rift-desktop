@@ -14,7 +14,20 @@ import './GameIcons.css';
 export function ChampionIcon({ name, size = 36, className = '', title }) {
   const version = useDdragonVersion();
   const [src, setSrc] = useState(() => champIconUrl(name, version));
-  useEffect(() => { setSrc(champIconUrl(name, version)); }, [name, version]);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setSrc(champIconUrl(name, version));
+    setFailed(false);
+  }, [name, version]);
+  if (failed) {
+    return (
+      <span
+        className={`rift-champ-icon is-empty ${className}`.trim()}
+        style={{ width: size, height: size, display: 'inline-block' }}
+        title={title || name}
+      />
+    );
+  }
   return (
     <img
       src={src}
@@ -22,7 +35,14 @@ export function ChampionIcon({ name, size = 36, className = '', title }) {
       title={title || name}
       className={`rift-champ-icon ${className}`.trim()}
       style={{ width: size, height: size }}
-      onError={() => setSrc(champIconUrl('Aatrox', version))}
+      onError={() => {
+        const fallback = champIconUrl('Aatrox', version);
+        if (src === fallback) {
+          setFailed(true);
+          return;
+        }
+        setSrc(fallback);
+      }}
     />
   );
 }
