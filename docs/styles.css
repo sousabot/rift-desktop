@@ -410,6 +410,106 @@ img { max-width: 100%; display: block; }
   line-height: 1.55;
 }
 
+/* —— Giveaway —— */
+.giveaway {
+  width: min(720px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 48px 0 64px;
+  text-align: center;
+}
+.giveaway .section-sub { margin-bottom: 28px; }
+.giveaway .section-sub strong { color: var(--gold); font-weight: 700; }
+.giveaway-panel {
+  text-align: left;
+  padding: 22px 22px 20px;
+  border: 1px solid rgba(255, 180, 84, 0.28);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 180, 84, 0.08), transparent 42%),
+    rgba(18, 20, 28, 0.92);
+}
+.giveaway-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.giveaway-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+}
+.giveaway-check input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--gold);
+  flex: 0 0 auto;
+}
+.giveaway-check span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.giveaway-check strong {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.giveaway-check strong a {
+  color: var(--gold);
+  text-decoration: none;
+}
+.giveaway-check strong a:hover { text-decoration: underline; }
+.giveaway-check em {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 13px;
+}
+.giveaway-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin: 18px 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.giveaway-meta strong { color: var(--text); }
+.giveaway-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.giveaway-actions .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}
+.giveaway-hint {
+  margin: 14px 0 0;
+  color: var(--faint);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.giveaway-hint.is-ready { color: var(--ok); }
+.giveaway-legal {
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* —— Premium —— */
 .premium {
   width: min(1080px, calc(100% - 40px));

@@ -50,4 +50,59 @@
       nav.classList.toggle('is-scrolled', window.scrollY > 8);
     }, { passive: true });
   }
+
+  // —— Launch giveaway (Follow + RT on X) ——
+  const tw = String(cfg.twitter || 'RIFT_LOL_').replace(/^@/, '');
+  const followUrl = `https://x.com/intent/follow?screen_name=${encodeURIComponent(tw)}`;
+  const profileUrl = `https://x.com/${encodeURIComponent(tw)}`;
+  const postUrl = String(cfg.giveawayPost || '').trim() || profileUrl;
+  const winners = Number(cfg.giveawayWinners) || 8;
+  const announce = cfg.giveawayAnnounce || '25 Aug 2026';
+  const prize = cfg.giveawayPrize || 'Rift Premium';
+
+  const setText = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  setText('giveawayWinners', String(winners));
+  setText('giveawayWinnersMeta', String(winners));
+  setText('giveawayAnnounce', announce);
+  setText('giveawayPrize', prize);
+
+  const followLink = document.getElementById('gwFollowLink');
+  if (followLink) {
+    followLink.href = profileUrl;
+    followLink.textContent = `@${tw}`;
+  }
+  const openFollow = document.getElementById('gwOpenFollow');
+  if (openFollow) {
+    openFollow.href = followUrl;
+    openFollow.textContent = `Follow @${tw}`;
+  }
+
+  const followBox = document.getElementById('gwFollow');
+  const rtBox = document.getElementById('gwRt');
+  const enterBtn = document.getElementById('gwEnter');
+  const hint = document.getElementById('gwHint');
+
+  function syncGiveaway() {
+    const ready = !!(followBox && rtBox && followBox.checked && rtBox.checked);
+    if (enterBtn) enterBtn.disabled = !ready;
+    if (hint) {
+      hint.classList.toggle('is-ready', ready);
+      hint.textContent = ready
+        ? 'You’re set — open the post and make sure your RT is public.'
+        : 'Tick both boxes after you follow and RT, then open the post.';
+    }
+  }
+
+  if (followBox) followBox.addEventListener('change', syncGiveaway);
+  if (rtBox) rtBox.addEventListener('change', syncGiveaway);
+  if (enterBtn) {
+    enterBtn.addEventListener('click', () => {
+      if (enterBtn.disabled) return;
+      window.open(postUrl, '_blank', 'noopener,noreferrer');
+    });
+  }
+  syncGiveaway();
 })();
