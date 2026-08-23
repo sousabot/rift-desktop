@@ -129,10 +129,10 @@ function isRangedChamp(champion, meta) {
 }
 
 const ROLE_STARTERS = {
-  Top: [1054],
+  Top: [1120, 1054],
   Jungle: [1101],
   Mid: [1056],
-  ADC: [1055],
+  ADC: [1086, 1055],
   Support: [3865],
 };
 
@@ -167,7 +167,7 @@ function ownsJunglePet(owned) {
 function starterFallback(role, tags) {
   const t = tags || [];
   if (role === 'Jungle') return [1101];
-  if (role === 'ADC' || t.includes('Marksman')) return [1055];
+  if (role === 'ADC' || t.includes('Marksman')) return [1086, 1055];
   if (role === 'Support' || (t.includes('Support') && !t.includes('Fighter'))) return [3865];
   if (t.includes('Mage') && !t.includes('Fighter')) return [1056];
   if (role === 'Mid' && t.includes('Mage')) return [1056];
@@ -467,7 +467,7 @@ const MAGICAL_FOOTWEAR = 8304;
 const SLIGHTLY_MAGICAL_BOOTS = 2422;
 
 /**
- * Override Lolalytics' most-picked boot when the enemy comp clearly calls for the other defensive boot.
+ * Override the most-picked boot when the enemy comp clearly calls for the other defensive boot.
  * Example: Ambessa vs Kennen / Lissandra / Nami → Mercs, not Steelcaps.
  * Katarina Mid vs full AD → Sorcs (or meta), never Mercs tagged "vs AP".
  */

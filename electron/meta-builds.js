@@ -5,16 +5,16 @@ const TREE = [8000, 8100, 8200, 8300, 8400];
 const BOOTS = new Set([3006, 3009, 3010, 3020, 3047, 3111, 3117, 3158, 2422, 3171, 3513]);
 const PETS = new Set([1101, 1102, 1103]);
 const STARTERS = new Set([
-  1054, 1055, 1056, 1082, 1083, 1101, 1102, 1103,
+  1054, 1055, 1056, 1082, 1083, 1086, 1101, 1102, 1103, 1120,
   2003, 2031, 3070, 3850, 3851, 3854, 3855, 3858, 3859,
   3862, 3863, 3865, 3866, 3867, 1035, 1039, 1041, 1036, 1028, 1027,
 ]);
 
 const ROLE_STARTERS = {
-  Top: [1054],
+  Top: [1120, 1054],
   Jungle: [1101],
   Mid: [1056],
-  ADC: [1055],
+  ADC: [1086, 1055],
   Support: [3865],
 };
 const SLUG = {
@@ -248,10 +248,10 @@ function roleFromTags(tags) {
 function starterFallback(role, tags) {
   const t = tags || [];
   if (role === 'Jungle') return [1101];
-  if (role === 'ADC' || t.includes('Marksman')) return [1055];
+  if (role === 'ADC' || t.includes('Marksman')) return [1086, 1055];
   if (role === 'Support' || (t.includes('Support') && !t.includes('Fighter'))) return [3865];
   if (t.includes('Mage') || (role === 'Mid' && !t.includes('Fighter') && !t.includes('Assassin'))) return [1056];
-  if (t.includes('Fighter') || t.includes('Tank') || role === 'Top') return [1054];
+  if (t.includes('Fighter') || t.includes('Tank') || role === 'Top') return [1120, 1054];
   if (t.includes('Assassin')) return [1055];
   return [...(ROLE_STARTERS[role] || [1054])];
 }
@@ -313,7 +313,7 @@ async function httpGetText(url) {
 }
 
 async function fetchSkillPriorities(slug, lane) {
-  const html = await httpGetText(`https://lolalytics.com/lol/${slug}/build/?lane=${lane}`);
+  const html = await httpGetText(`https://lolalytics.com/lol/${slug}/build/?lane=${lane}&tier=emerald_plus`);
   return parseSkillPriorities(html);
 }
 
@@ -381,6 +381,11 @@ function starterOptionsFrom(earlySet, itemSet1, role, tags) {
   // Always offer the common role fountain buys so comp logic can choose them.
   for (const id of starterFallback(role, tags)) {
     if (!tally.has(id)) tally.set(id, { id, games: 0, wr: 0, wrGames: 0 });
+  }
+  // Doran's Bow (1086) is the current ADC fountain item; keep Blade as alt.
+  if ((role === 'ADC' || tags?.includes('Marksman'))) {
+    if (!tally.has(1086)) tally.set(1086, { id: 1086, games: 0, wr: 0, wrGames: 0 });
+    if (!tally.has(1055)) tally.set(1055, { id: 1055, games: 0, wr: 0, wrGames: 0 });
   }
   // Long Sword is a real DPM-style opener into ER / lethality even when rare as "most played".
   if ((role === 'ADC' || role === 'Mid' || role === 'Top') && !tally.has(1036)) {
@@ -460,7 +465,7 @@ async function fetchMetaBuilds({ champion, role, spells } = {}) {
   const tags = tagMap[champion] || tagMap[slugOf(champion)] || tagMap[String(champion || '').replace(/[^a-zA-Z0-9]/g, '')] || [];
   const resolvedRole = LANE[role] ? role : roleFromTags(tags);
   const lane = LANE[resolvedRole] || 'top';
-  const key = `${slug}|${lane}|v4`;
+  const key = `${slug}|${lane}|v6`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.data;
 
@@ -500,14 +505,14 @@ async function fetchMetaBuilds({ champion, role, spells } = {}) {
         extra: situationalFor(path.ids.slice(0, 3), sets.itemSet4 || sets.itemSet5),
         runes,
         role: resolvedRole,
-        source: 'Lolalytics emerald+',
+        source: 'Emerald+',
       };
     });
     const data = {
       ok: true,
       builds,
       role: resolvedRole,
-      source: 'Lolalytics',
+      source: 'Emerald+',
       starterOptions,
       skillOptions: (skills || []).slice(0, 5),
     };

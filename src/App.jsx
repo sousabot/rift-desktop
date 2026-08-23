@@ -23,6 +23,8 @@ import Pros from './pages/Pros';
 import Studio from './pages/Studio';
 import Lens from './pages/Lens';
 import Premium from './pages/Premium';
+import TierList from './pages/TierList';
+import TierListChampion from './pages/TierListChampion';
 import Overlays from './pages/Overlays';
 import OverlayHud from './pages/OverlayHud';
 
@@ -42,7 +44,8 @@ export default function App() {
             <Route path="/compare" element={<Compare />} />
             <Route path="/collections" element={<Collections />} />
             <Route path="/replays" element={<Navigate to="/" replace />} />
-            <Route path="/tierlist" element={<Navigate to="/" replace />} />
+            <Route path="/tierlist" element={<TierList />} />
+            <Route path="/tierlist/:champion" element={<TierListChampion />} />
             <Route path="/draft" element={<Draft />} />
             <Route path="/spectate" element={<Spectate />} />
             <Route path="/pros" element={<Pros />} />

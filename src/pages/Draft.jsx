@@ -878,7 +878,7 @@ function Loadout({
                 <>
                   <SkillPriority kit={kit} skills={skillBuild.skills} size={40} />
                   <p className="dr-hint">
-                    {`Max order in ${Number(skillBuild.skills.games || 0).toLocaleString()} Lolalytics emerald+ games — not a guess.`}
+                    {`Max order in ${Number(skillBuild.skills.games || 0).toLocaleString()} Emerald+ ranked games — not a guess.`}
                   </p>
                 </>
               ) : (

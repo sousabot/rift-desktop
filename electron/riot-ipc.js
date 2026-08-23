@@ -581,21 +581,7 @@ module.exports = function registerRiotHandlers(ipcMain) {
     }, LAST_MATCH_TTL_MS)
   );
 
-  require('./tierlist')(ipcMain, {
-    riotFetch,
-    mapWithConcurrency,
-    matchRegionOf: (platform) => PLATFORM_TO_MATCH_REGION[platform] || 'europe',
-    matchCache,
-    fetchMatch: async (region, id, bag) => {
-      const cache = bag || matchCache.readCache();
-      const key = `match:${id}`;
-      if (cache[key]?.data) return cache[key].data;
-      const data = await riotFetch(`https://${region}.api.riotgames.com/lol/match/v5/matches/${id}`, 2);
-      cache[key] = { timestamp: Date.now(), data };
-      if (!bag) matchCache.writeCache(cache);
-      return data;
-    },
-  });
+  require('./tierlist')(ipcMain);
   require('./lens-benchmarks')(ipcMain, {
     riotFetch,
     mapWithConcurrency,

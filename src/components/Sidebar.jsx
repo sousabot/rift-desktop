@@ -141,7 +141,7 @@ const NAV_GROUPS = [
       { to: '/', labelKey: 'nav.dashboard', icon: <IconHome />, end: true },
       { to: '/history', labelKey: 'nav.history', icon: <IconHistory /> },
       { to: '/champions', labelKey: 'nav.champions', icon: <IconChamp /> },
-      { labelKey: 'nav.tierList', icon: <IconTier />, soon: true },
+      { to: '/tierlist', labelKey: 'nav.tierList', icon: <IconTier /> },
       { to: '/leaderboard', labelKey: 'nav.leaderboard', icon: <IconList /> },
       { to: '/live', labelKey: 'nav.live', icon: <IconLive /> },
       { to: '/compare', labelKey: 'nav.compare', icon: <IconCompare /> },

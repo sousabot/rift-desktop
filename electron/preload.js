@@ -98,6 +98,7 @@ contextBridge.exposeInMainWorld('probuildsAPI', {
 
 contextBridge.exposeInMainWorld('metaBuildsAPI', {
   get: (args) => ipcRenderer.invoke('meta:builds', args),
+  detail: (args) => ipcRenderer.invoke('meta:championDetail', args),
 });
 
 contextBridge.exposeInMainWorld('prosAPI', {

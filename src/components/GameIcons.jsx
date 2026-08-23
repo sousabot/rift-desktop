@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
   champIconUrl,
-  champLoadingUrl,
+  champPortraitUrls,
+  getChampionIndex,
   itemIconUrl,
   runeIconUrl,
   spellIconUrl,
@@ -47,14 +48,31 @@ export function ChampionIcon({ name, size = 36, className = '', title }) {
   );
 }
 
-export function ChampionPortrait({ name, className = '' }) {
-  const [src, setSrc] = useState(() => (name ? champLoadingUrl(name) : ''));
-  const [failed, setFailed] = useState(!name);
+export function ChampionPortrait({ name, cid, ddragonId, className = '' }) {
+  const [index, setIndex] = useState(null);
+  const [urlIdx, setUrlIdx] = useState(0);
+
   useEffect(() => {
-    setSrc(name ? champLoadingUrl(name) : '');
-    setFailed(!name);
-  }, [name]);
-  if (!name || failed) {
+    let alive = true;
+    getChampionIndex().then((idx) => {
+      if (alive) {
+        setIndex(idx);
+        setUrlIdx(0);
+      }
+    });
+    return () => { alive = false; };
+  }, [name, cid, ddragonId]);
+
+  const urls = name
+    ? champPortraitUrls({ name, cid, ddragonId, index })
+    : [];
+
+  useEffect(() => {
+    setUrlIdx(0);
+  }, [urls]);
+
+  const src = urls[urlIdx];
+  if (!name || !src) {
     return <div className={`rift-champ-portrait is-empty ${className}`.trim()} />;
   }
   return (
@@ -62,7 +80,9 @@ export function ChampionPortrait({ name, className = '' }) {
       src={src}
       alt={name}
       className={`rift-champ-portrait ${className}`.trim()}
-      onError={() => setFailed(true)}
+      onError={() => {
+        setUrlIdx((i) => (i + 1 < urls.length ? i + 1 : i));
+      }}
     />
   );
 }

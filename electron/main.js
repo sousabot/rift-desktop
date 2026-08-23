@@ -197,6 +197,7 @@ app.whenReady().then(() => {
   require('./season-peak')(ipcMain);
   require('./ugg-lp')(ipcMain);
   require('./meta-builds')(ipcMain);
+  require('./champion-detail')(ipcMain);
   require('./pros')(ipcMain);
   recorder.register(ipcMain);
   require('./updater').register({

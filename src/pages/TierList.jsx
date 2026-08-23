@@ -1,42 +1,75 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getChampionTierList } from '../services/riotApi';
 import { ChampionIcon } from '../components/GameIcons';
 import { REGIONS } from '../lib/regions';
 import { apiUserMessage, noticeFromError } from '../lib/apiNotice';
 import { useSession } from '../state/SessionContext';
+import { useI18n } from '../i18n/LocaleContext';
 import RoleIcon from '../components/RoleIcon';
 import './TierList.css';
 
 const ROLES = [
-  { id: 'all', label: 'All' },
-  { id: 'Top', label: 'Top' },
-  { id: 'Jungle', label: 'Jungle' },
-  { id: 'Mid', label: 'Mid' },
-  { id: 'ADC', label: 'Bot' },
-  { id: 'Support', label: 'Support' },
+  { id: 'all', labelKey: 'tierList.roleAll' },
+  { id: 'Top', labelKey: 'tierList.roleTop' },
+  { id: 'Jungle', labelKey: 'tierList.roleJungle' },
+  { id: 'Mid', labelKey: 'tierList.roleMid' },
+  { id: 'ADC', labelKey: 'tierList.roleBot' },
+  { id: 'Support', labelKey: 'tierList.roleSupport' },
 ];
 
 const RANKS = [
-  { id: 'challenger', label: 'Challenger' },
-  { id: 'grandmaster', label: 'Grandmaster' },
-  { id: 'master_plus', label: 'Master+' },
-  { id: 'master', label: 'Master' },
-  { id: 'diamond_plus', label: 'Diamond+' },
-  { id: 'diamond', label: 'Diamond' },
-  { id: 'emerald_plus', label: 'Emerald+' },
-  { id: 'platinum_plus', label: 'Platinum+' },
-  { id: 'gold_plus', label: 'Gold+' },
+  { id: 'challenger', labelKey: 'tierList.rankChallenger' },
+  { id: 'grandmaster', labelKey: 'tierList.rankGrandmaster' },
+  { id: 'master_plus', labelKey: 'tierList.rankMasterPlus' },
+  { id: 'master', labelKey: 'tierList.rankMaster' },
+  { id: 'diamond_plus', labelKey: 'tierList.rankDiamondPlus' },
+  { id: 'diamond', labelKey: 'tierList.rankDiamond' },
+  { id: 'emerald_plus', labelKey: 'tierList.rankEmeraldPlus' },
+  { id: 'emerald', labelKey: 'tierList.rankEmerald' },
+  { id: 'platinum_plus', labelKey: 'tierList.rankPlatinumPlus' },
+  { id: 'platinum', labelKey: 'tierList.rankPlatinum' },
+  { id: 'gold_plus', labelKey: 'tierList.rankGoldPlus' },
+  { id: 'gold', labelKey: 'tierList.rankGold' },
 ];
 
-const RANK_LABEL = Object.fromEntries(RANKS.map((r) => [r.id, r.label]));
-
 function emblemUrl(id) {
-  const tier = id.replace('_plus', '').replace(/_.*/, '');
-  return `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/ranked-emblem/emblem-${tier}.png`;
+  const tier = String(id || 'challenger').replace('_plus', '').replace(/_.*/, '');
+  return `https://opgg-static.akamaized.net/images/medals_new/${tier}.png`;
 }
 
 function fmtGames(n) {
   return Number(n || 0).toLocaleString();
+}
+
+function fmtDelta(n) {
+  const v = Number(n || 0);
+  return `${v > 0 ? '+' : ''}${v.toFixed(1)}%`;
+}
+
+function fmtPct(n) {
+  return `${Number(n || 0).toFixed(1)}%`;
+}
+
+function tierClass(tier) {
+  const t = String(tier || '?');
+  if (t === 'S+') return 'Sp';
+  if (t === 'S') return 'S';
+  if (t === 'S-') return 'Sm';
+  if (t === 'A+') return 'Ap';
+  if (t === 'A') return 'A';
+  if (t === 'A-') return 'Am';
+  if (t.startsWith('B')) return 'B';
+  if (t.startsWith('C')) return 'C';
+  if (t.startsWith('D')) return 'D';
+  return 'na';
+}
+
+function rankTone(index) {
+  if (index === 0) return 'is-gold';
+  if (index === 1) return 'is-silver';
+  if (index === 2) return 'is-bronze';
+  return '';
 }
 
 function IconStar() {
@@ -49,16 +82,29 @@ function IconStar() {
 
 export default function TierList() {
   const { session } = useSession();
-  const [role, setRole] = useState('all');
-  const [rank, setRank] = useState('challenger');
-  const [platform, setPlatform] = useState(session?.platform || 'euw1');
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [role, setRole] = useState(searchParams.get('role') || 'all');
+  const [rank, setRank] = useState(searchParams.get('rank') || 'master');
+  const [platform, setPlatform] = useState(searchParams.get('platform') || session?.platform || 'euw1');
   const [query, setQuery] = useState('');
   const [offMeta, setOffMeta] = useState(false);
   const [rankOpen, setRankOpen] = useState(false);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [progress, setProgress] = useState('Loading ladder…');
+  const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
+
+  const openChampion = (row) => {
+    const params = new URLSearchParams({
+      role: row.role,
+      rank,
+      platform,
+    });
+    if (data?.patch) params.set('patch', data.patch);
+    navigate(`/tierlist/${encodeURIComponent(row.champion)}?${params.toString()}`, { state: { row } });
+  };
 
   const applyPayload = (next) => {
     if (!next) return;
@@ -70,7 +116,7 @@ export default function TierList() {
   const load = async (opts = {}) => {
     setLoading(true);
     if (!opts.force) setError('');
-    setProgress(opts.force ? 'Rebuilding…' : 'Loading ladder…');
+    setProgress(opts.force ? t('tierList.refreshing') : t('tierList.loadingTitle'));
     let next = null;
     try {
       next = await getChampionTierList({
@@ -81,16 +127,13 @@ export default function TierList() {
       applyPayload(next);
     } catch (err) {
       noticeFromError(err);
-      setError(apiUserMessage(err) || 'Could not build the tier list. Wait a moment and try again.');
+      setError(apiUserMessage(err) || t('tierList.fail'));
     } finally {
-      setLoading(!!next?.refreshing);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    const unsubProgress = window.riotAPI?.onTierListProgress?.((message) => {
-      if (message) setProgress(message);
-    });
     const unsubReady = window.riotAPI?.onTierListReady?.((next) => {
       if (!next) return;
       if (next.platform && next.platform !== platform) return;
@@ -99,7 +142,6 @@ export default function TierList() {
       setLoading(false);
     });
     return () => {
-      unsubProgress?.();
       unsubReady?.();
     };
   }, [platform, rank]);
@@ -109,6 +151,11 @@ export default function TierList() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [platform, rank]);
+
+  const analyzed = useMemo(
+    () => data?.analysed || data?.matches || 0,
+    [data],
+  );
 
   const rows = useMemo(() => {
     const all = data?.rows || [];
@@ -124,30 +171,53 @@ export default function TierList() {
       const best = new Map();
       for (const row of list) {
         const prev = best.get(row.champion);
-        if (!prev || row.games > prev.games) best.set(row.champion, row);
+        if (!prev || (row.metaScore ?? row.score) > (prev.metaScore ?? prev.score)) {
+          best.set(row.champion, row);
+        }
       }
       list = [...best.values()];
     }
-    return [...list].sort((a, b) => a.rank - b.rank || b.winrate - a.winrate);
+    return [...list].sort((a, b) => {
+      const ar = role === 'all' ? a.rank : (a.roleRank || a.rank);
+      const br = role === 'all' ? b.rank : (b.roleRank || b.rank);
+      return ar - br || (b.metaScore ?? b.score) - (a.metaScore ?? a.score);
+    });
   }, [data, role, query, offMeta]);
+
+  const rankLabel = t(RANKS.find((r) => r.id === rank)?.labelKey || 'tierList.rankMaster');
 
   return (
     <div className="tl-page">
       <header className="tl-head">
-        <div>
-          <h1>Tier list</h1>
-          <p>
-            Live Solo/Duo sample from this ladder. Winrates are confidence-adjusted,
-            so a 2–0 cannot rank S+.
-            {data?.matches ? ` ${fmtGames(data.matches)} games` : ''}
-            {data?.reliable != null ? ` · ${data.reliable} champs with enough games` : ''}.
-            {data?.matches && data.matches < 80 ? ' Rebuild later to add more games.' : ''}
-            {data?.note ? ` ${data.note}` : ''}
-          </p>
+        <div className="tl-head-main">
+          <div className="tl-badges">
+            <span className="tl-badge is-rank">
+              <img src={emblemUrl(rank)} alt="" />
+              {rankLabel}
+            </span>
+            <span className="tl-badge is-patch">
+              {t('tierList.patch', { patch: data?.patch || '—' })}
+            </span>
+          </div>
+          <h1>{t('tierList.title')}</h1>
+          <p>{t('tierList.blurb')}</p>
+          {analyzed ? (
+            <p className="tl-meta">
+              {t('tierList.sample', { n: fmtGames(analyzed) })}
+              {data?.reliable != null ? ` · ${t('tierList.reliable', { n: data.reliable })}` : ''}
+              {data?.source ? ` · ${t('tierList.source')}` : ''}
+            </p>
+          ) : null}
         </div>
-        <button type="button" className="tl-refresh" onClick={() => load({ force: true })} disabled={loading}>
-          {loading ? (data ? 'Updating…' : 'Building…') : 'Rebuild'}
-        </button>
+        <div className="tl-head-side">
+          <div className="tl-stat">
+            <strong>{fmtGames(analyzed)}</strong>
+            <span>{t('tierList.analyzed')}</span>
+          </div>
+          <button type="button" className="tl-refresh" onClick={() => load({ force: true })} disabled={loading}>
+            {loading ? t('tierList.refreshing') : t('tierList.refresh')}
+          </button>
+        </div>
       </header>
 
       <div className="tl-toolbar">
@@ -158,12 +228,12 @@ export default function TierList() {
               type="button"
               className={`tl-role${role === item.id ? ' is-on' : ''}`}
               onClick={() => setRole(item.id)}
-              title={item.label}
+              title={t(item.labelKey)}
             >
               {item.id === 'all'
                 ? <IconStar />
                 : <RoleIcon role={item.id} size={18} />}
-              <span>{item.label}</span>
+              <span>{t(item.labelKey)}</span>
             </button>
           ))}
         </div>
@@ -172,7 +242,7 @@ export default function TierList() {
           <div className="tl-rank-wrap">
             <button type="button" className="tl-select" onClick={() => setRankOpen((v) => !v)}>
               <img src={emblemUrl(rank)} alt="" />
-              {RANK_LABEL[rank] || 'Challenger'}
+              {rankLabel}
             </button>
             {rankOpen ? (
               <div className="tl-rank-menu">
@@ -184,7 +254,7 @@ export default function TierList() {
                     onClick={() => { setRank(item.id); setRankOpen(false); }}
                   >
                     <img src={emblemUrl(item.id)} alt="" />
-                    {item.label}
+                    {t(item.labelKey)}
                   </button>
                 ))}
               </div>
@@ -201,18 +271,16 @@ export default function TierList() {
             ))}
           </select>
 
-          <span className="tl-patch">Patch {data?.patch || '—'}</span>
-
           <label className="tl-toggle">
             <input type="checkbox" checked={offMeta} onChange={(e) => setOffMeta(e.target.checked)} />
-            Off-meta
+            {t('tierList.offMeta')}
           </label>
 
           <input
             className="tl-search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search champion..."
+            placeholder={t('tierList.search')}
           />
         </div>
       </div>
@@ -221,45 +289,58 @@ export default function TierList() {
 
       {loading && !data ? (
         <div className="tl-loading">
-          <strong>{progress}</strong>
-          First load samples this ladder and saves the games on your PC. Rebuild later to grow the sample.
+          <strong>{progress || t('tierList.loadingTitle')}</strong>
+          {t('tierList.loadingBody')}
         </div>
       ) : (
         <div className="tl-table-wrap">
           <div className="tl-table-head">
-            <span>Rank</span>
-            <span>Champion</span>
-            <span>Lane</span>
-            <span>Tier</span>
-            <span>Winrate</span>
-            <span>Pickrate</span>
-            <span>Games</span>
+            <span>{t('tierList.colRank')}</span>
+            <span>{t('tierList.colChampion')}</span>
+            <span>{t('tierList.colLane')}</span>
+            <span>{t('tierList.colTier')}</span>
+            <span>{t('tierList.colWr')}</span>
+            <span>{t('tierList.colPick')}</span>
+            <span>{t('tierList.colBan')}</span>
+            <span>{t('tierList.colGames')}</span>
           </div>
-          {rows.map((row, i) => (
-            <div key={`${row.champion}-${row.role}`} className="tl-row">
-              <span className="tl-num">{i + 1}</span>
-              <span className="tl-champ">
-                <ChampionIcon name={row.champion} size={32} />
-                {row.champion}
-              </span>
-              <span className="tl-lane">
-                <RoleIcon role={row.role} size={16} />
-                <em>{row.lanePct.toFixed(1)}%</em>
-              </span>
-              <span className={`tl-tier is-${String(row.tier).replace('+', 'p').replace('?', 'na')}`}>{row.tier}</span>
-              <span className="tl-wr">
-                {row.winrate.toFixed(1)}%
-                <em className={row.delta >= 0 ? 'is-up' : 'is-down'}>
-                  {row.delta >= 0 ? '+' : ''}{row.delta.toFixed(1)} vs field
-                </em>
-              </span>
-              <span>{row.pickrate.toFixed(1)}%</span>
-              <span>{fmtGames(row.games)}</span>
-            </div>
-          ))}
+          <div className="tl-table-body">
+            {rows.map((row, i) => (
+              <button
+                key={`${row.champion}-${row.role}`}
+                type="button"
+                className={`tl-row${rankTone(i) ? ` ${rankTone(i)}` : ''}`}
+                onClick={() => openChampion(row)}
+              >
+                <span className={`tl-num${rankTone(i) ? ` ${rankTone(i)}` : ''}`}>{i + 1}</span>
+                <span className="tl-champ">
+                  <ChampionIcon name={row.champion} size={36} />
+                  <span className="tl-champ-name">{row.champion}</span>
+                </span>
+                <span className="tl-lane">
+                  <RoleIcon role={row.role} size={16} />
+                  <em>{row.lanePct.toFixed(1)}%</em>
+                </span>
+                <span className={`tl-tier is-${tierClass(row.tier)}`}>
+                  <span>{row.tier}</span>
+                </span>
+                <span className="tl-wr">
+                  <strong className={row.delta >= 0 ? 'is-up' : 'is-down'}>
+                    {fmtPct(row.winrate)}
+                  </strong>
+                  <em className={row.delta >= 0 ? 'is-up' : 'is-down'}>
+                    {t('tierList.vsRole', { delta: fmtDelta(row.delta) })}
+                  </em>
+                </span>
+                <span className="tl-rate">{fmtPct(row.pickrate)}</span>
+                <span className="tl-rate is-ban">{fmtPct(row.banrate)}</span>
+                <span className="tl-games">{fmtGames(row.games)}</span>
+              </button>
+            ))}
+          </div>
           {!rows.length && !loading ? (
             <div className="tl-empty">
-              {error ? 'No sample loaded yet. Wait 2 minutes if you hit the rate limit, then rebuild on Challenger.' : 'No champions matched these filters.'}
+              {error ? t('tierList.emptySample') : t('tierList.emptyFilters')}
             </div>
           ) : null}
         </div>

@@ -29,6 +29,62 @@ export function champDdragonId(name) {
   return String(name || 'Aatrox').replace(/[^a-zA-Z0-9]/g, '').replace(/^./, (c) => c.toUpperCase());
 }
 
+function normChampName(name) {
+  return String(name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+}
+
+let champIndexPromise = null;
+
+export function getChampionIndex() {
+  if (!champIndexPromise) {
+    champIndexPromise = getDdragonVersion()
+      .then((version) => fetch(`https://ddragon.leagueoflegends.com/cdn/${version}/data/en_US/champion.json`)
+        .then((r) => r.json())
+        .then((json) => {
+          const byName = {};
+          const byKey = {};
+          Object.values(json.data || {}).forEach((ch) => {
+            byKey[Number(ch.key)] = ch.id;
+            [ch.name, ch.id].forEach((label) => {
+              byName[normChampName(label)] = ch.id;
+            });
+          });
+          return { version, byName, byKey };
+        }))
+      .catch(() => ({ version: cached, byName: {}, byKey: {} }));
+  }
+  return champIndexPromise;
+}
+
+export function useChampionIndex() {
+  const [index, setIndex] = useState({ byName: {}, byKey: {} });
+  useEffect(() => { getChampionIndex().then(setIndex); }, []);
+  return index;
+}
+
+export function resolveChampDdragonId(name, index, cid) {
+  const num = Number(cid);
+  if (num > 0 && index?.byKey?.[num]) return index.byKey[num];
+  const norm = normChampName(name);
+  if (index?.byName?.[norm]) return index.byName[norm];
+  return champDdragonId(name);
+}
+
+export function champPortraitUrls({ name, ddragonId, cid, index } = {}) {
+  const id = ddragonId || resolveChampDdragonId(name, index, cid);
+  const urls = [];
+  if (id) {
+    urls.push(`https://ddragon.leagueoflegends.com/cdn/img/champion/loading/${id}_0.jpg`);
+    urls.push(`https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${id}_0.jpg`);
+  }
+  const num = Number(cid);
+  if (num > 0) {
+    urls.push(`https://cdn.communitydragon.org/latest/champion/${num}/splash-art/centered/skin/0`);
+    urls.push(`https://cdn.communitydragon.org/latest/champion/${num}/square`);
+  }
+  return [...new Set(urls.filter(Boolean))];
+}
+
 export function champIconUrl(name, version = cached) {
   return `https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${champDdragonId(name)}.png`;
 }
