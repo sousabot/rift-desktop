@@ -7,9 +7,12 @@
   const release = base ? `${base}/releases/latest` : '#download';
   const setupName = ver ? `Rift.lol-Setup-${ver}.exe` : 'Rift.lol-Setup.exe';
   const portableName = ver ? `Rift.lol-${ver}-portable.exe` : 'Rift.lol-portable.exe';
-  // Direct asset URLs 404 until the GitHub release exists — send CTAs to /releases/latest.
-  const setupUrl = release;
-  const portableUrl = release;
+  const setupUrl = base && ver
+    ? `${base}/releases/download/${tag}/${setupName}`
+    : release;
+  const portableUrl = base && ver
+    ? `${base}/releases/download/${tag}/${portableName}`
+    : release;
 
   const year = document.getElementById('year');
   if (year) year.textContent = String(new Date().getFullYear());
