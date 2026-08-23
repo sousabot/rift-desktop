@@ -189,7 +189,11 @@ app.whenReady().then(() => {
   require('./spectate').register(ipcMain, { riotFetch: riotIpc.riotFetch });
   registerStatsHandlers(ipcMain);
   registerFeedbackHandlers(ipcMain);
-  require('./premium-ipc')(ipcMain);
+  try {
+    require('./premium-ipc')(ipcMain);
+  } catch (err) {
+    console.error('[premium] failed to register IPC handlers:', err);
+  }
   require('./season-peak')(ipcMain);
   require('./ugg-lp')(ipcMain);
   require('./meta-builds')(ipcMain);

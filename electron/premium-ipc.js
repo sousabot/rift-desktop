@@ -1,6 +1,31 @@
 const { shell } = require('electron');
 const { apiUrl, appToken } = require('./rift-env');
-const premium = require('../server/premium');
+
+let premium;
+try {
+  premium = require('../server/premium');
+} catch (err) {
+  console.error('[premium-ipc] local premium module unavailable:', err?.message || err);
+  premium = {
+    isStripeReady: () => false,
+    statusPayload: () => ({
+      stripe: false,
+      demo: true,
+      plans: { month: false, six: false, year: false },
+    }),
+    createCheckoutSession: async () => {
+      const e = new Error('Local Stripe module missing — use the API proxy.');
+      e.code = 'NO_LOCAL';
+      throw e;
+    },
+    redeemCheckoutSession: async () => {
+      throw new Error('Local Stripe module missing — use the API proxy.');
+    },
+    redeemGiftCode: () => {
+      throw new Error('Local gift module missing — use the API proxy.');
+    },
+  };
+}
 
 function proxyHeaders() {
   return {
