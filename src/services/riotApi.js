@@ -797,12 +797,17 @@ function emitLeagueRows(job, rows, info) {
   });
 }
 
+function yieldToUi() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 export async function getTopLeague({
   tier = 'challenger',
   queue = 'RANKED_SOLO_5x5',
   platform = 'euw1',
   region = 'europe',
   onPartial,
+  signal,
   silent = false,
 } = {}) {
   requireBridge();
@@ -813,6 +818,17 @@ export async function getTopLeague({
     topLeagueJobs.set(key, job);
   }
   if (onPartial) job.listeners.add(onPartial);
+
+  const dropListener = () => {
+    if (onPartial) job.listeners.delete(onPartial);
+  };
+  if (signal) {
+    if (signal.aborted) {
+      dropListener();
+      return job.rows || [];
+    }
+    signal.addEventListener('abort', dropListener, { once: true });
+  }
 
   try {
     if (job.rows) onPartial?.(job.rows);
@@ -825,6 +841,7 @@ export async function getTopLeague({
         queue,
         platform,
         region,
+        isActive: () => job.listeners.size > 0,
         onPartial: (rows, info) => emitLeagueRows(job, rows, info),
       }).then((rows) => {
         emitLeagueRows(job, rows, { phase: 'done' });
@@ -843,7 +860,8 @@ export async function getTopLeague({
     }
     throw err;
   } finally {
-    if (onPartial) job.listeners.delete(onPartial);
+    dropListener();
+    if (signal) signal.removeEventListener('abort', dropListener);
   }
 }
 
@@ -853,8 +871,10 @@ async function loadTopLeague({
   platform,
   region,
   onPartial,
+  isActive = () => true,
 }) {
     const data = await window.riotAPI.getTopLeague({ tier, queue, platform, limit: NAME_ICON_LIMIT });
+    if (!isActive()) return [];
     const top = (data?.entries || [])
       .sort((a, b) => b.leaguePoints - a.leaguePoints)
       .slice(0, NAME_ICON_LIMIT);
@@ -895,6 +915,7 @@ async function loadTopLeague({
         return [];
       }),
     ]);
+    if (!isActive()) return rows;
 
     rows = top.map((e, i) => {
       const acc = accounts[i];
@@ -905,12 +926,14 @@ async function loadTopLeague({
       };
     });
     onPartial?.(rows, { phase: 'names' });
+    await yieldToUi();
 
     const matchPuuids = [];
     const idsByPlayer = [];
     const matchById = {};
 
     const ingestWave = async (puuids, lists) => {
+      if (!isActive()) return;
       puuids.forEach((puuid, j) => {
         matchPuuids.push(puuid);
         idsByPlayer.push(matchIdList(lists[j]));
@@ -925,22 +948,25 @@ async function loadTopLeague({
           }
         });
       });
-      const CHUNK = 8;
+      const CHUNK = 5;
       if (!needed.length) {
         rows = mergeMatchStats(rows, top, idsByPlayer, matchById, matchPuuids);
         onPartial?.(rows, { phase: 'roles' });
         return;
       }
       for (let i = 0; i < needed.length; i += CHUNK) {
+        if (!isActive()) return;
         const chunk = needed.slice(i, i + CHUNK);
         const batch = await window.riotAPI.getMatchesBulk({ matchIds: chunk, region }).catch(() => []);
         (batch || []).forEach((m) => { if (m?.metadata?.matchId) matchById[m.metadata.matchId] = m; });
         rows = mergeMatchStats(rows, top, idsByPlayer, matchById, matchPuuids);
         onPartial?.(rows, { phase: 'roles' });
+        await yieldToUi();
       }
     };
 
     await ingestWave(firstWave, firstLists);
+    if (!isActive()) return rows;
 
     const summonersPromise = window.riotAPI.getSummonersByPuuidsBulk({
       puuids: iconPuuids,
@@ -951,6 +977,7 @@ async function loadTopLeague({
     });
 
     for (let i = ROLE_WAVE; i < iconPuuids.length; i += ROLE_WAVE) {
+      if (!isActive()) return rows;
       const slice = iconPuuids.slice(i, i + ROLE_WAVE);
       const lists = await window.riotAPI.getLastMatchIdsBulk({
         puuids: slice,
@@ -959,8 +986,10 @@ async function loadTopLeague({
         count: GAMES_PER_PLAYER,
       }).catch(() => []);
       await ingestWave(slice, lists);
+      await yieldToUi();
     }
 
+    if (!isActive()) return rows;
     const summoners = await summonersPromise;
     rows = rows.map((row, i) => {
       const summ = summoners[i];

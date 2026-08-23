@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ChampionIcon } from '../components/GameIcons';
 import RoleIcon from '../components/RoleIcon';
@@ -636,7 +636,8 @@ function ProfileIconThumb({ id, version, className = '' }) {
 function ProfileIcons({ rows, query, sort, t }) {
   const version = useDdragonVersion();
   const [limit, setLimit] = useState(36);
-  const q = query.trim().toLowerCase();
+  const deferredQuery = useDeferredValue(query);
+  const q = String(deferredQuery || '').trim().toLowerCase();
 
   const sorted = useMemo(() => {
     const list = (rows || [])
@@ -863,6 +864,7 @@ export default function Studio() {
   }, [view, soul, soulOptions]);
 
   const metricRows = useMemo(() => {
+    if (view === 'icons' || view === 'rank-dist' || view === 'home') return [];
     const q = query.trim().toLowerCase();
     return (rawRows || [])
       .map((row) => {
@@ -889,7 +891,7 @@ export default function Studio() {
             games: row.total ?? row.games ?? null,
           };
         }
-        const champion = row.key || row.championName || champIds[String(row.championId)] || String(row.championId || '');
+        const champion = String(row.key || row.championName || champIds[String(row.championId)] || row.championId || '');
         return {
           rowKey: `${row.soul || ''}-${champion}`,
           champion,

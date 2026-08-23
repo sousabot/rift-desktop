@@ -521,7 +521,7 @@ module.exports = function registerRiotHandlers(ipcMain) {
           prefetch: false,
         }).catch(() => {});
       });
-    }, 20000);
+    }, 45000);
   }
 
   ipcMain.handle('riot:getTopLeague', (_e, args) => fetchTopLeague(args || {}));

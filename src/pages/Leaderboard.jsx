@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { startTransition, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getTopLeague } from '../services/riotApi';
 import { champIconUrl, platformLabel, useDdragonVersion } from '../services/ddragon';
@@ -43,14 +43,29 @@ const PLACE_TONE = { 1: '#ffd76b', 2: '#c9d0dc', 3: '#cd7f32' };
 function ChampThumb({ name, size = 28 }) {
   const version = useDdragonVersion();
   const [src, setSrc] = useState(() => champIconUrl(name, version));
-  useEffect(() => { setSrc(champIconUrl(name, version)); }, [name, version]);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setSrc(champIconUrl(name, version));
+    setFailed(false);
+  }, [name, version]);
+  if (failed) {
+    return <span className="lb-champ is-empty" style={{ width: size, height: size, display: 'inline-block' }} />;
+  }
   return (
     <img
       src={src}
       alt={name}
       title={name}
       className="lb-champ"
-      onError={() => setSrc(champIconUrl('Aatrox', version))}
+      loading="lazy"
+      onError={() => {
+        const fallback = champIconUrl('Aatrox', version);
+        if (src === fallback) {
+          setFailed(true);
+          return;
+        }
+        setSrc(fallback);
+      }}
       style={{ width: size, height: size }}
     />
   );
@@ -155,6 +170,7 @@ export default function Leaderboard() {
 
   useEffect(() => {
     let cancelled = false;
+    const ac = new AbortController();
     setError('');
     setRows([]);
     setLoading(true);
@@ -164,22 +180,27 @@ export default function Leaderboard() {
       tier,
       platform,
       region,
+      signal: ac.signal,
       onPartial: (data, info) => {
         if (cancelled) return;
-        setRows(Array.isArray(data) ? data : []);
-        setLoading(false);
-        const phase = info?.phase;
-        setHydrating(phase !== 'done');
-        setEnriching(phase === 'ladder' || phase === 'names');
+        startTransition(() => {
+          setRows(Array.isArray(data) ? data : []);
+          setLoading(false);
+          const phase = info?.phase;
+          setHydrating(phase !== 'done');
+          setEnriching(phase === 'ladder' || phase === 'names');
+        });
       },
     }).then((data) => {
       if (cancelled) return;
-      setRows(Array.isArray(data) ? data : []);
-      setLoading(false);
-      setEnriching(false);
-      setHydrating(false);
+      startTransition(() => {
+        setRows(Array.isArray(data) ? data : []);
+        setLoading(false);
+        setEnriching(false);
+        setHydrating(false);
+      });
     }).catch((err) => {
-      if (!cancelled) {
+      if (!cancelled && err?.name !== 'AbortError') {
         setLoading(false);
         setEnriching(false);
         setHydrating(false);
@@ -187,7 +208,10 @@ export default function Leaderboard() {
         setError(err?.message || 'Could not load this ladder.');
       }
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
   }, [tier, platform, region]);
 
   const roleCounts = useMemo(() => {
