@@ -200,7 +200,8 @@ export function rankColor(label) {
 export function rankImg(label) {
   const tier = rankTierKey(label).toLowerCase();
   if (!tier || tier === 'unranked' || tier === 'none' || tier === 'unavailable') return null;
-  return `https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default/images/ranked-mini-crests/${tier}.png`;
+  // OP.GG CDN (Community Dragon mini-crests are unreliable from browsers).
+  return `https://opgg-static.akamaized.net/images/medals_new/${tier}.png`;
 }
 
 export function rankEmblemClass(label, base) {

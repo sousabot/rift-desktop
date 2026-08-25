@@ -138,20 +138,96 @@ function formatRankEntry(pick) {
       lp: null,
       wins: null,
       losses: null,
+      winrate: null,
       estMmr: null,
+      lpDelta30d: null,
     };
   }
   const apex = ['MASTER', 'GRANDMASTER', 'CHALLENGER'].includes(String(pick.tier).toUpperCase());
   const division = !apex && pick.rank ? ` ${pick.rank}` : '';
+  const wins = pick.wins ?? null;
+  const losses = pick.losses ?? null;
+  const played = (Number(wins) || 0) + (Number(losses) || 0);
   return {
     rank: `${formatTier(pick.tier)}${division}`,
     rankTier: pick.tier,
     rankDivision: apex ? null : pick.rank || null,
     lp: pick.leaguePoints ?? null,
-    wins: pick.wins ?? null,
-    losses: pick.losses ?? null,
+    wins,
+    losses,
+    winrate: played ? Math.round((Number(wins) / played) * 100) : null,
     estMmr: estimateRankMmr(pick.tier, pick.rank, pick.leaguePoints),
+    lpDelta30d: null,
   };
+}
+
+const PLATFORM_TO_OPGG = {
+  euw1: 'euw', na1: 'na', kr: 'kr', eun1: 'eune', br1: 'br', jp1: 'jp',
+  la1: 'lan', la2: 'las', oc1: 'oce', tr1: 'tr', ru: 'ru', me1: 'me',
+  ph2: 'ph', sg2: 'sg', th2: 'th', tw2: 'tw', vn2: 'vn',
+};
+
+async function fetchJsonUrl(url) {
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      'User-Agent': 'Mozilla/5.0 Rift.lol',
+    },
+  });
+  if (!res.ok) {
+    const err = new Error(`opgg ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/** LP / elo change over ~30 days from OP.GG lp_histories (solo). */
+async function fetchOpggLpDelta30d(platform, riotId) {
+  const region = PLATFORM_TO_OPGG[String(platform || '').toLowerCase()] || 'euw';
+  const id = String(riotId || '').trim();
+  if (!id.includes('#')) return null;
+  try {
+    const search = await fetchJsonUrl(
+      `https://lol-api-summoner.op.gg/api/v3/${region}/summoners?riot_id=${encodeURIComponent(id)}&hl=en_US`
+    );
+    const hit = Array.isArray(search?.data) ? search.data[0] : search?.data;
+    const opggPuuid = hit?.puuid;
+    if (!opggPuuid) return null;
+    const full = await fetchJsonUrl(
+      `https://lol-api-summoner.op.gg/api/v3/${region}/summoners/${encodeURIComponent(opggPuuid)}?hl=en_US`
+    );
+    const body = full?.data && !Array.isArray(full.data) ? full.data : full;
+    const rows = (body?.lp_histories || [])
+      .map((row) => {
+        const at = Date.parse(row?.created_at || '') || 0;
+        const elo = Number(row?.elo_point);
+        const info = row?.tier_info || {};
+        const mmr = Number.isFinite(elo)
+          ? elo
+          : estimateRankMmr(
+            info.tier,
+            ({ 1: 'I', 2: 'II', 3: 'III', 4: 'IV' }[Number(info.division)] || info.division),
+            info.lp
+          );
+        return { at, elo: mmr };
+      })
+      .filter((row) => row.at && Number.isFinite(row.elo))
+      .sort((a, b) => a.at - b.at);
+    if (rows.length < 2) return null;
+    const now = Date.now();
+    const cutoff = now - (30 * 24 * 60 * 60 * 1000);
+    let baseline = null;
+    for (const row of rows) {
+      if (row.at <= cutoff) baseline = row;
+      else break;
+    }
+    if (!baseline) baseline = rows[0];
+    const current = rows[rows.length - 1];
+    return Math.round(current.elo - baseline.elo);
+  } catch {
+    return null;
+  }
 }
 
 function roleLabel(position) {
@@ -506,6 +582,9 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
   const flexEntry = rankedList.find((r) => r.queueType === 'RANKED_FLEX_SR') || null;
   const soloRanked = formatRankEntry(soloEntry);
   const flexRanked = formatRankEntry(flexEntry);
+  const riotId = `${account.gameName}#${account.tagLine}`;
+  const lpDelta30d = await fetchOpggLpDelta30d(shard, riotId);
+  if (lpDelta30d != null) soloRanked.lpDelta30d = lpDelta30d;
 
   const champMap = {};
   recentGames.forEach((g) => {
@@ -554,7 +633,7 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
   };
 
   return {
-    riotId: `${account.gameName}#${account.tagLine}`,
+    riotId,
     gameName: account.gameName,
     tagLine: account.tagLine,
     puuid,

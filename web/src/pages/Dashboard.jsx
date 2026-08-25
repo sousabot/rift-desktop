@@ -147,9 +147,16 @@ function groupByDay(games) {
 
 function RankCard({ title, ranked, ladderRank, sparkData }) {
   const color = rankColor(ranked?.rank);
-  const wr = ranked?.wins != null
-    ? Math.round((ranked.wins / Math.max(1, ranked.wins + ranked.losses)) * 100)
-    : null;
+  const emblem = rankImg(ranked?.rank);
+  const wr = ranked?.winrate != null
+    ? ranked.winrate
+    : (ranked?.wins != null
+      ? Math.round((ranked.wins / Math.max(1, ranked.wins + ranked.losses)) * 100)
+      : null);
+  const lpDelta = ranked?.lpDelta30d;
+  const lpDeltaLabel = lpDelta == null
+    ? null
+    : `${lpDelta > 0 ? '+' : ''}${lpDelta} LP`;
   return (
     <article className="wd-rank-card">
       <div className="wd-rank-card-top">
@@ -157,19 +164,42 @@ function RankCard({ title, ranked, ladderRank, sparkData }) {
         {ladderRank ? <span className="wd-rank-ladder">#{ladderRank}</span> : null}
       </div>
       <div className="wd-rank-card-main">
-        {rankImg(ranked?.rank) ? (
-          <img src={rankImg(ranked.rank)} alt="" className="wd-rank-emblem" />
-        ) : (
-          <span className="wd-rank-emblem is-empty" />
-        )}
+        {emblem ? (
+          <img
+            src={emblem}
+            alt={ranked?.rank || ''}
+            className="wd-rank-emblem"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+              const fallback = e.currentTarget.nextElementSibling;
+              if (fallback) fallback.hidden = false;
+            }}
+          />
+        ) : null}
+        <span className="wd-rank-emblem is-empty" hidden={Boolean(emblem)} />
         <div>
           <strong style={{ color }}>{ranked?.rank || 'Unranked'}</strong>
           <span>{ranked?.lp != null ? `${ranked.lp} LP` : '—'}</span>
         </div>
       </div>
       {ranked?.wins != null ? (
-        <div className="wd-rank-record">
-          {ranked.wins}W – {ranked.losses}L{wr != null ? ` · ${wr}%` : ''}
+        <div className="wd-rank-stats">
+          <div className="wd-rank-stat">
+            <span>Record</span>
+            <strong>{ranked.wins}W – {ranked.losses}L</strong>
+          </div>
+          <div className="wd-rank-stat">
+            <span>Winrate</span>
+            <strong className={wr >= 50 ? 'is-up' : wr != null ? 'is-down' : ''}>
+              {wr != null ? `${wr}%` : '—'}
+            </strong>
+          </div>
+          <div className="wd-rank-stat">
+            <span>LP 30d</span>
+            <strong className={lpDelta > 0 ? 'is-up' : lpDelta < 0 ? 'is-down' : ''}>
+              {lpDeltaLabel || '—'}
+            </strong>
+          </div>
         </div>
       ) : (
         <div className="wd-rank-record muted">No ranked games yet</div>
