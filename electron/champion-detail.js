@@ -349,3 +349,4 @@ async function fetchChampionDetail({
 module.exports = function registerChampionDetail(ipcMain) {
   ipcMain.handle('meta:championDetail', (_e, args) => fetchChampionDetail(args || {}));
 };
+module.exports.fetchChampionDetail = fetchChampionDetail;

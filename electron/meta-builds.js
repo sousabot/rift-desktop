@@ -529,3 +529,4 @@ function register(ipcMain) {
 }
 
 module.exports = register;
+module.exports.fetchMetaBuilds = fetchMetaBuilds;

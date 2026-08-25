@@ -128,6 +128,14 @@ async function serverRiotFetch(url) {
 
 const spectateFeed = require('../electron/spectate-feed').createScanner({ riotFetch: serverRiotFetch });
 const premium = require('./premium');
+const { registerWebApi } = require('./web-api');
+
+const webRoutes = new Map();
+registerWebApi({
+  get(path, handler) {
+    webRoutes.set(`GET ${path}`, handler);
+  },
+});
 
 async function postDiscord(payload) {
   const webhook = String(process.env.DISCORD_WEBHOOK_URL || '').trim();
@@ -205,6 +213,24 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/v1/premium/status') {
     send(res, 200, premium.statusPayload());
+    return;
+  }
+
+  // Public product-site endpoints (rate-limited, no desktop Bearer token).
+  const webKey = `${req.method} ${url.pathname}`;
+  const webHandler = webRoutes.get(webKey);
+  if (webHandler) {
+    if (rateLimited(clientIp(req))) {
+      send(res, 429, { error: 'Rate limit — wait 2 minutes and try again.' });
+      return;
+    }
+    try {
+      const data = await webHandler(req, url, serverRiotFetch);
+      send(res, 200, data);
+    } catch (err) {
+      const status = err.status && err.status >= 400 && err.status < 600 ? err.status : 500;
+      send(res, status, { error: err.message || 'Request failed' });
+    }
     return;
   }
 
