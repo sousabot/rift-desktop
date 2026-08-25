@@ -1047,6 +1047,7 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     const damage = p.totalDamageDealtToChampions || 0;
     const extras = timelineExtras(m, timelines[idx], puuid);
     const scoreboard = buildScoreboard(m, timelines[idx], puuid);
+    const selfBoard = scoreboard.players.find((row) => row.isSelf);
     return {
       matchId: m.metadata.matchId,
       win: p.win,
