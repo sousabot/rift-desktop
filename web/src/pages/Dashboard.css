@@ -776,7 +776,11 @@
   border-bottom-color: var(--violet);
 }
 
-.wd-expand-body { padding: 12px; }
+.wd-expand-loading {
+  padding: 10px 14px;
+  font-size: 12px;
+}
+.wd-expand-loading.is-error { color: var(--danger); }
 
 .wd-sb-team { margin-bottom: 14px; }
 .wd-sb-team-head {

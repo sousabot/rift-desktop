@@ -215,7 +215,7 @@ function RankCard({ title, ranked, ladderRank, sparkData }) {
   );
 }
 
-function MatchRow({ game, version, runeIndex, expanded, onToggle }) {
+function MatchRow({ game, version, runeIndex, expanded, onToggle, puuid, onHydrated }) {
   const items = (game.items || []).slice(0, 7);
   while (items.length < 7) items.push(0);
   return (
@@ -277,7 +277,13 @@ function MatchRow({ game, version, runeIndex, expanded, onToggle }) {
       </button>
 
       {expanded ? (
-        <MatchExpand game={game} version={version} runeIndex={runeIndex} />
+        <MatchExpand
+          game={game}
+          version={version}
+          runeIndex={runeIndex}
+          puuid={puuid}
+          onHydrated={onHydrated}
+        />
       ) : null}
     </div>
   );
@@ -692,6 +698,18 @@ export default function Dashboard() {
                             runeIndex={runeIndex}
                             expanded={expandedId === g.matchId}
                             onToggle={() => setExpandedId((id) => (id === g.matchId ? null : g.matchId))}
+                            puuid={profile.puuid}
+                            onHydrated={(next) => {
+                              setProfile((prev) => {
+                                if (!prev?.recentGames) return prev;
+                                return {
+                                  ...prev,
+                                  recentGames: prev.recentGames.map((row) => (
+                                    row.matchId === next.matchId ? { ...row, ...next } : row
+                                  )),
+                                };
+                              });
+                            }}
                           />
                         ))}
                       </div>

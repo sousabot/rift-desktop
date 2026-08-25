@@ -259,7 +259,7 @@ function registerWebApi(router) {
     };
   });
 
-  const { getDashboard, getLiveGame } = require('./dashboard');
+  const { getDashboard, getLiveGame, getMatchTimelineDetails } = require('./dashboard');
 
   router.get('/v1/web/dashboard', async (req, url, riotFetch) => {
     const gameName = url.searchParams.get('gameName') || url.searchParams.get('name') || '';
@@ -280,6 +280,13 @@ function registerWebApi(router) {
     const platform = url.searchParams.get('platform') || 'euw1';
     const region = url.searchParams.get('region') || '';
     return getLiveGame(riotFetch, { gameName, tagLine, platform, region });
+  });
+
+  router.get('/v1/web/match-timeline', async (req, url, riotFetch) => {
+    const matchId = clip(url.searchParams.get('matchId') || '', 64);
+    const region = clip(url.searchParams.get('region') || 'europe', 16) || 'europe';
+    const puuid = clip(url.searchParams.get('puuid') || '', 128);
+    return getMatchTimelineDetails(riotFetch, { matchId, region, puuid });
   });
 }
 

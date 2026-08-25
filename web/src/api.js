@@ -89,4 +89,13 @@ export function getLiveGame({ gameName, tagLine, platform = 'euw1', region } = {
   return getJson(`/v1/web/live?${q.toString()}`, { timeoutMs: 30000 });
 }
 
+export function getMatchTimeline({ matchId, region = 'europe', puuid } = {}) {
+  const q = new URLSearchParams({
+    matchId,
+    region,
+    puuid,
+  });
+  return getJson(`/v1/web/match-timeline?${q.toString()}`, { timeoutMs: 60000 });
+}
+
 export { apiBase };

@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { getMatchTimeline } from '../api';
 import {
   champIconUrl,
   itemIconUrl,
@@ -350,8 +351,49 @@ function RunesTab({ game, version, runeIndex }) {
   );
 }
 
-export default function MatchExpand({ game, version, runeIndex }) {
+export default function MatchExpand({ game, version, runeIndex, puuid, onHydrated }) {
   const [tab, setTab] = useState('general');
+  const [liveGame, setLiveGame] = useState(game);
+  const [timelineBusy, setTimelineBusy] = useState(false);
+  const [timelineError, setTimelineError] = useState('');
+
+  useEffect(() => {
+    setLiveGame(game);
+    setTimelineError('');
+  }, [game]);
+
+  useEffect(() => {
+    const needsTimeline = !liveGame?.hasTimeline
+      || !(liveGame.buildPurchases || []).length
+      || !(liveGame.skillOrder || []).length
+      || liveGame.goldDiff15 == null;
+    if (!needsTimeline || !liveGame?.matchId || !puuid) return undefined;
+    let cancelled = false;
+    setTimelineBusy(true);
+    setTimelineError('');
+    getMatchTimeline({
+      matchId: liveGame.matchId,
+      region: liveGame.matchRegion || 'europe',
+      puuid,
+    }).then((extra) => {
+      if (cancelled) return;
+      const next = {
+        ...liveGame,
+        ...extra,
+        hasTimeline: true,
+      };
+      setLiveGame(next);
+      onHydrated?.(next);
+    }).catch((err) => {
+      if (!cancelled) setTimelineError(err.message || 'Could not load match timeline.');
+    }).finally(() => {
+      if (!cancelled) setTimelineBusy(false);
+    });
+    return () => { cancelled = true; };
+    // Only re-fetch when expanding a different match.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveGame?.matchId, puuid]);
+
   return (
     <div className="wd-expand">
       <div className="wd-expand-tabs">
@@ -370,15 +412,21 @@ export default function MatchExpand({ game, version, runeIndex }) {
           </button>
         ))}
       </div>
+      {timelineBusy ? (
+        <div className="wd-expand-loading muted">Loading build, skills, and laning timeline…</div>
+      ) : null}
+      {timelineError ? (
+        <div className="wd-expand-loading is-error">{timelineError}</div>
+      ) : null}
       <div className="wd-expand-body" onClick={(e) => e.stopPropagation()}>
         {tab === 'general' ? (
-          <GeneralTab game={game} version={version} runeIndex={runeIndex} />
+          <GeneralTab game={liveGame} version={version} runeIndex={runeIndex} />
         ) : null}
         {tab === 'details' ? (
-          <DetailsTab game={game} version={version} />
+          <DetailsTab game={liveGame} version={version} />
         ) : null}
         {tab === 'runes' ? (
-          <RunesTab game={game} version={version} runeIndex={runeIndex} />
+          <RunesTab game={liveGame} version={version} runeIndex={runeIndex} />
         ) : null}
       </div>
     </div>

@@ -2,8 +2,8 @@
 
 const DASHBOARD_TTL_MS = 2 * 60 * 1000;
 const LIVE_TTL_MS = 20 * 1000;
-const TIMELINE_LIMIT = 10;
 const MATCH_CONCURRENCY = 4;
+const TIMELINE_CONCURRENCY = 2;
 
 const MODE_QUEUE = { All: null, Solo: 420, Flex: 440, Aram: 450, Normal: 400 };
 
@@ -447,6 +447,84 @@ function participantRunes(p) {
   };
 }
 
+function timelineExtras(match, timeline, puuid) {
+  if (!match?.info || !timeline?.info?.frames?.length || !puuid) {
+    return {
+      hasTimeline: false,
+      goldDiff15: null,
+      kaDiff15: null,
+      csDiff15: null,
+      xpDiff15: null,
+      cs15: null,
+      buildPurchases: [],
+      skillOrder: [],
+    };
+  }
+  const p = match.info.participants.find((pp) => pp.puuid === puuid);
+  if (!p) {
+    return {
+      hasTimeline: false,
+      goldDiff15: null,
+      kaDiff15: null,
+      csDiff15: null,
+      xpDiff15: null,
+      cs15: null,
+      buildPurchases: [],
+      skillOrder: [],
+    };
+  }
+  const at15 = computeAt15(timeline, match, p);
+  return {
+    hasTimeline: true,
+    ...at15,
+    buildPurchases: itemPurchases(timeline, p.participantId),
+    skillOrder: skillOrder(timeline, p.participantId),
+  };
+}
+
+async function fetchTimeline(riotFetch, region, matchId) {
+  try {
+    return await riotFetch(
+      `https://${region}.api.riotgames.com/lol/match/v5/matches/${encodeURIComponent(matchId)}/timeline`
+    );
+  } catch {
+    try {
+      await new Promise((r) => setTimeout(r, 350));
+      return await riotFetch(
+        `https://${region}.api.riotgames.com/lol/match/v5/matches/${encodeURIComponent(matchId)}/timeline`
+      );
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function getMatchTimelineDetails(riotFetch, { matchId, region, puuid }) {
+  const id = String(matchId || '').trim();
+  const matchRegion = String(region || 'europe').toLowerCase();
+  if (!id || !puuid) {
+    const err = new Error('matchId and puuid are required.');
+    err.status = 400;
+    throw err;
+  }
+  const match = await riotFetch(
+    `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${encodeURIComponent(id)}`
+  );
+  const timeline = await fetchTimeline(riotFetch, matchRegion, id);
+  const extras = timelineExtras(match, timeline, puuid);
+  if (!extras.hasTimeline) {
+    const err = new Error('Match timeline unavailable from Riot.');
+    err.status = 404;
+    throw err;
+  }
+  const scoreboard = buildScoreboard(match, timeline, puuid);
+  return {
+    matchId: id,
+    ...extras,
+    scoreboard,
+  };
+}
+
 function buildScoreboard(match, timeline, selfPuuid) {
   const mins = Math.max(1, (match.info.gameDuration || 1) / 60);
   const rows = (match.info.participants || []).map((pp) => {
@@ -618,22 +696,20 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
   }
   if (!Array.isArray(matchIds)) matchIds = [];
 
-  const timelineIds = matchIds.slice(0, TIMELINE_LIMIT);
-  const [matches, timelines, masteries, meta] = await Promise.all([
-    mapWithConcurrency(matchIds, MATCH_CONCURRENCY, async (id) => {
-      try {
-        return await riotFetch(`https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${id}`);
-      } catch {
-        return null;
-      }
-    }),
-    mapWithConcurrency(timelineIds, MATCH_CONCURRENCY, async (id) => {
-      try {
-        return await riotFetch(`https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${id}/timeline`);
-      } catch {
-        return null;
-      }
-    }),
+  const matches = await mapWithConcurrency(matchIds, MATCH_CONCURRENCY, async (id) => {
+    try {
+      return await riotFetch(`https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${id}`);
+    } catch {
+      return null;
+    }
+  });
+
+  // Timelines after matches, lower concurrency + retry — needed for build/skill/@15.
+  const timelines = await mapWithConcurrency(matchIds, TIMELINE_CONCURRENCY, (id) => (
+    fetchTimeline(riotFetch, matchRegion, id)
+  ));
+
+  const [masteries, meta] = await Promise.all([
     riotFetch(`https://${shard}.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-puuid/${account.puuid}`)
       .catch(() => []),
     getChampionMeta(),
@@ -681,7 +757,6 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     const teamKills = m.info.participants
       .filter((pp) => pp.teamId === p.teamId)
       .reduce((sum, pp) => sum + pp.kills, 0);
-    const { goldDiff15, kaDiff15, csDiff15, xpDiff15, cs15 } = computeAt15(timelines[idx], m, p);
     const phases = computePhaseScores(timelines[idx], m, p);
     const allyTeam = [
       p.championName,
@@ -703,6 +778,7 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     const gdScore = gdScoreFromParticipant(p, m);
     const kp = teamKills > 0 ? (p.kills + p.assists) / teamKills : 0;
     const damage = p.totalDamageDealtToChampions || 0;
+    const extras = timelineExtras(m, timelines[idx], puuid);
     const scoreboard = buildScoreboard(m, timelines[idx], puuid);
     const selfBoard = scoreboard.players.find((row) => row.isSelf);
     return {
@@ -728,6 +804,7 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
       queueLabel: QUEUE_NAMES[m.info.queueId] || 'Other',
       queueType: QUEUE_NAMES[m.info.queueId] || 'Other',
       region: PLATFORM_LABEL[shard] || String(shard).toUpperCase(),
+      matchRegion,
       gpm: Math.round(p.goldEarned / mins),
       visionPerMin: Number((p.visionScore / mins).toFixed(1)),
       visionScore: Number(p.visionScore) || 0,
@@ -735,11 +812,11 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
       kpPct: Math.round(kp * 100),
       damage,
       dpm: Math.round(damage / mins),
-      goldDiff15,
-      kaDiff15,
-      csDiff15,
-      xpDiff15,
-      cs15,
+      goldDiff15: extras.goldDiff15,
+      kaDiff15: extras.kaDiff15,
+      csDiff15: extras.csDiff15,
+      xpDiff15: extras.xpDiff15,
+      cs15: extras.cs15,
       earlyScore: phases.early,
       midScore: phases.mid,
       lateScore: phases.late,
@@ -767,8 +844,9 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
         f: Number(p.summoner2Casts) || 0,
       },
       pings: selfBoard?.pings || {},
-      buildPurchases: selfBoard?.buildPurchases || [],
-      skillOrder: selfBoard?.skillOrder || [],
+      buildPurchases: extras.buildPurchases,
+      skillOrder: extras.skillOrder,
+      hasTimeline: extras.hasTimeline,
       scoreboard,
     };
   }).filter(Boolean);
@@ -992,4 +1070,4 @@ async function getLiveGame(riotFetch, { gameName, tagLine, platform, region }) {
   return data;
 }
 
-module.exports = { getDashboard, getLiveGame, MODE_QUEUE };
+module.exports = { getDashboard, getLiveGame, getMatchTimelineDetails, MODE_QUEUE };
