@@ -2,7 +2,11 @@
 
 const DASHBOARD_TTL_MS = 2 * 60 * 1000;
 const LIVE_TTL_MS = 20 * 1000;
+const CAREER_TTL_MS = 60 * 60 * 1000;
+const CAREER_MAX_GAMES = 400;
+const CAREER_PAGE = 100;
 const MATCH_CONCURRENCY = 4;
+const CAREER_CONCURRENCY = 6;
 const TIMELINE_CONCURRENCY = 2;
 
 const MODE_QUEUE = { All: null, Solo: 420, Flex: 440, Aram: 450, Normal: 400 };
@@ -63,6 +67,8 @@ const PHASE_NEUTRAL = 50;
 const cache = new Map();
 const inflight = new Map();
 const liveCache = new Map();
+const careerCache = new Map();
+const careerInflight = new Map();
 let champMeta = { at: 0, map: {}, total: 0 };
 
 async function mapWithConcurrency(items, limit, fn) {
@@ -182,8 +188,8 @@ async function fetchJsonUrl(url) {
   return res.json();
 }
 
-/** LP / elo change over ~30 days from OP.GG lp_histories (solo). */
-async function fetchOpggLpDelta30d(platform, riotId) {
+/** Ranked cards + LP delta from OP.GG when Riot league entries are empty/stale. */
+async function fetchOpggProfileExtras(platform, riotId) {
   const region = PLATFORM_TO_OPGG[String(platform || '').toLowerCase()] || 'euw';
   const id = String(riotId || '').trim();
   if (!id.includes('#')) return null;
@@ -198,6 +204,22 @@ async function fetchOpggLpDelta30d(platform, riotId) {
       `https://lol-api-summoner.op.gg/api/v3/${region}/summoners/${encodeURIComponent(opggPuuid)}?hl=en_US`
     );
     const body = full?.data && !Array.isArray(full.data) ? full.data : full;
+    const leagueStats = Array.isArray(body?.league_stats) ? body.league_stats : [];
+    const soloStat = leagueStats.find((s) => s.game_type === 'SOLORANKED') || null;
+    const flexStat = leagueStats.find((s) => s.game_type === 'FLEXRANKED') || null;
+    const fromStat = (stat) => {
+      const info = stat?.tier_info || {};
+      if (!info.tier) return null;
+      const divMap = { 1: 'I', 2: 'II', 3: 'III', 4: 'IV' };
+      return formatRankEntry({
+        tier: info.tier,
+        rank: divMap[Number(info.division)] || info.division || null,
+        leaguePoints: info.lp,
+        wins: stat.win ?? stat.match_record?.win ?? null,
+        losses: stat.lose ?? stat.match_record?.lose ?? null,
+      });
+    };
+
     const rows = (body?.lp_histories || [])
       .map((row) => {
         const at = Date.parse(row?.created_at || '') || 0;
@@ -214,17 +236,37 @@ async function fetchOpggLpDelta30d(platform, riotId) {
       })
       .filter((row) => row.at && Number.isFinite(row.elo))
       .sort((a, b) => a.at - b.at);
-    if (rows.length < 2) return null;
-    const now = Date.now();
-    const cutoff = now - (30 * 24 * 60 * 60 * 1000);
-    let baseline = null;
-    for (const row of rows) {
-      if (row.at <= cutoff) baseline = row;
-      else break;
+
+    let lpDelta30d = null;
+    if (rows.length >= 2) {
+      const now = Date.now();
+      const cutoff = now - (30 * 24 * 60 * 60 * 1000);
+      let baseline = null;
+      for (const row of rows) {
+        if (row.at <= cutoff) baseline = row;
+        else break;
+      }
+      if (!baseline) baseline = rows[0];
+      const current = rows[rows.length - 1];
+      lpDelta30d = Math.round(current.elo - baseline.elo);
     }
-    if (!baseline) baseline = rows[0];
-    const current = rows[rows.length - 1];
-    return Math.round(current.elo - baseline.elo);
+
+    // Prefer search payload solo_tier when league_stats missing.
+    const soloFromSearch = hit?.solo_tier_info?.tier
+      ? formatRankEntry({
+        tier: hit.solo_tier_info.tier,
+        rank: ({ 1: 'I', 2: 'II', 3: 'III', 4: 'IV' }[Number(hit.solo_tier_info.division)] || null),
+        leaguePoints: hit.solo_tier_info.lp,
+        wins: null,
+        losses: null,
+      })
+      : null;
+
+    return {
+      solo: fromStat(soloStat) || soloFromSearch,
+      flex: fromStat(flexStat),
+      lpDelta30d,
+    };
   } catch {
     return null;
   }
@@ -240,6 +282,191 @@ function roleLabel(position) {
   };
   const key = String(position || '').toUpperCase();
   return map[key] || null;
+}
+
+function extractPings(pp) {
+  return {
+    assist: Number(pp.assistMePings) || 0,
+    onMyWay: Number(pp.onMyWayPings) || 0,
+    missing: Number(pp.enemyMissingPings) || 0,
+    needVision: Number(pp.needVisionPings) || 0,
+    enemyVision: Number(pp.enemyVisionPings) || 0,
+    allIn: Number(pp.allInPings) || 0,
+    // Kept for older clients / match detail labels.
+    danger: Number(pp.getBackPings) || 0,
+    push: Number(pp.pushPings) || 0,
+  };
+}
+
+function aggregateRolePerformance(games) {
+  const order = ['BOTTOM', 'JUNGLE', 'MIDDLE', 'TOP', 'UTILITY'];
+  const labels = {
+    BOTTOM: 'ADC',
+    JUNGLE: 'JUNGLE',
+    MIDDLE: 'MID',
+    TOP: 'TOP',
+    UTILITY: 'SUPPORT',
+  };
+  const map = {};
+  order.forEach((key) => { map[key] = { wins: 0, losses: 0 }; });
+  games.forEach((g) => {
+    const key = String(g.roleKey || '').toUpperCase();
+    if (!map[key]) return;
+    map[key][g.win ? 'wins' : 'losses'] += 1;
+  });
+  return order
+    .map((key) => {
+      const d = map[key];
+      const gamesCount = d.wins + d.losses;
+      return {
+        roleKey: key,
+        role: labels[key],
+        games: gamesCount,
+        wins: d.wins,
+        losses: d.losses,
+        wr: gamesCount ? Math.round((d.wins / gamesCount) * 100) : 0,
+      };
+    })
+    .sort((a, b) => b.games - a.games || a.role.localeCompare(b.role));
+}
+
+function aggregatePlayedWith(games, selfPuuid) {
+  const map = {};
+  games.forEach((g) => {
+    const players = g.scoreboard?.players || [];
+    const self = players.find((p) => p.isSelf) || players.find((p) => p.puuid === selfPuuid);
+    if (!self) return;
+    players
+      .filter((p) => p.teamId === self.teamId && p.puuid && p.puuid !== self.puuid)
+      .forEach((p) => {
+        if (!map[p.puuid]) {
+          map[p.puuid] = {
+            puuid: p.puuid,
+            gameName: p.gameName || p.champion || 'Unknown',
+            tagLine: p.tagLine || '',
+            riotId: p.riotId || '',
+            champion: p.champion,
+            wins: 0,
+            losses: 0,
+          };
+        }
+        const row = map[p.puuid];
+        row.champion = p.champion || row.champion;
+        if (p.gameName) row.gameName = p.gameName;
+        if (p.tagLine) row.tagLine = p.tagLine;
+        if (p.riotId) row.riotId = p.riotId;
+        row[g.win ? 'wins' : 'losses'] += 1;
+      });
+  });
+  return Object.values(map)
+    .map((d) => {
+      const gamesCount = d.wins + d.losses;
+      return {
+        ...d,
+        games: gamesCount,
+        wr: gamesCount ? Math.round((d.wins / gamesCount) * 100) : 0,
+      };
+    })
+    .sort((a, b) => b.games - a.games || b.wr - a.wr)
+    .slice(0, 4);
+}
+
+function aggregateTotalPings(games) {
+  const keys = ['assist', 'onMyWay', 'missing', 'needVision', 'enemyVision', 'allIn'];
+  const totals = Object.fromEntries(keys.map((k) => [k, 0]));
+  let counted = 0;
+  games.forEach((g) => {
+    const p = g.pings;
+    if (!p) return;
+    counted += 1;
+    keys.forEach((k) => { totals[k] += Number(p[k]) || 0; });
+  });
+  const n = Math.max(1, counted);
+  return {
+    games: counted,
+    totals,
+    averages: Object.fromEntries(
+      keys.map((k) => [k, Number((totals[k] / n).toFixed(1))])
+    ),
+  };
+}
+
+/** Lightweight per-match rows for career Role / Played With / Pings (all queues). */
+function careerGameFromMatch(match, selfPuuid) {
+  if (!match?.info?.participants) return null;
+  const self = match.info.participants.find((pp) => pp.puuid === selfPuuid);
+  if (!self) return null;
+  const players = match.info.participants.map((pp) => {
+    const gameName = pp.riotIdGameName || pp.gameName || '';
+    const tagLine = pp.riotIdTagline || pp.tagLine || '';
+    return {
+      puuid: pp.puuid,
+      isSelf: pp.puuid === selfPuuid,
+      teamId: pp.teamId,
+      champion: pp.championName,
+      gameName,
+      tagLine,
+      riotId: gameName && tagLine ? `${gameName}#${tagLine}` : '',
+    };
+  });
+  const lanePos = self.teamPosition || self.individualPosition || '';
+  return {
+    win: !!self.win,
+    roleKey: String(lanePos || '').toUpperCase() || null,
+    pings: extractPings(self),
+    scoreboard: { players },
+  };
+}
+
+async function fetchCareerMatchIds(riotFetch, matchRegion, puuid) {
+  const ids = [];
+  for (let start = 0; start < CAREER_MAX_GAMES; start += CAREER_PAGE) {
+    const take = Math.min(CAREER_PAGE, CAREER_MAX_GAMES - start);
+    let page = [];
+    try {
+      page = await riotFetch(
+        `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?start=${start}&count=${take}`
+      );
+    } catch {
+      break;
+    }
+    if (!Array.isArray(page) || !page.length) break;
+    ids.push(...page);
+    if (page.length < take) break;
+  }
+  return ids;
+}
+
+async function loadCareerSidebar(riotFetch, puuid, matchRegion) {
+  const key = `${matchRegion}|${puuid}`;
+  const hit = careerCache.get(key);
+  if (hit && Date.now() - hit.at < CAREER_TTL_MS) return hit.data;
+  if (careerInflight.has(key)) return careerInflight.get(key);
+
+  const pending = (async () => {
+    const ids = await fetchCareerMatchIds(riotFetch, matchRegion, puuid);
+    const matches = await mapWithConcurrency(ids, CAREER_CONCURRENCY, async (id) => {
+      try {
+        return await riotFetch(`https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${id}`);
+      } catch {
+        return null;
+      }
+    });
+    const games = matches.map((m) => careerGameFromMatch(m, puuid)).filter(Boolean);
+    const data = {
+      games: games.length,
+      rolePerformance: aggregateRolePerformance(games),
+      playedWith: aggregatePlayedWith(games, puuid),
+      totalPings: aggregateTotalPings(games),
+    };
+    careerCache.set(key, { at: Date.now(), data });
+    return data;
+  })().finally(() => {
+    if (careerInflight.get(key) === pending) careerInflight.delete(key);
+  });
+
+  careerInflight.set(key, pending);
+  return pending;
 }
 
 function scale(value, par, excellent) {
@@ -579,14 +806,7 @@ function buildScoreboard(match, timeline, selfPuuid) {
       spell4Casts: Number(pp.spell4Casts) || 0,
       summoner1Casts: Number(pp.summoner1Casts) || 0,
       summoner2Casts: Number(pp.summoner2Casts) || 0,
-      pings: {
-        assist: Number(pp.assistMePings) || 0,
-        onMyWay: Number(pp.onMyWayPings) || 0,
-        enemyVision: Number(pp.enemyVisionPings) || 0,
-        danger: Number(pp.dangerPings) || 0,
-        missing: Number(pp.enemyMissingPings) || 0,
-        push: Number(pp.pushPings) || 0,
-      },
+      pings: extractPings(pp),
     };
   });
 
@@ -685,6 +905,9 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
   const matchCount = Math.min(Math.max(Number(count) || 20, 1), 20);
   const q = resolveModeQueue(mode, queue);
 
+  // Career sidebar (Role / Played With / Pings) — all queues, not limited to last 20 Solo.
+  const careerPromise = loadCareerSidebar(riotFetch, account.puuid, matchRegion).catch(() => null);
+
   let matchIds = [];
   try {
     const qParam = q != null ? `&queue=${q}` : '';
@@ -709,10 +932,11 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     fetchTimeline(riotFetch, matchRegion, id)
   ));
 
-  const [masteries, meta] = await Promise.all([
+  const [masteries, meta, career] = await Promise.all([
     riotFetch(`https://${shard}.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-puuid/${account.puuid}`)
       .catch(() => []),
     getChampionMeta(),
+    careerPromise,
   ]);
 
   let ranked = [];
@@ -780,7 +1004,6 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     const damage = p.totalDamageDealtToChampions || 0;
     const extras = timelineExtras(m, timelines[idx], puuid);
     const scoreboard = buildScoreboard(m, timelines[idx], puuid);
-    const selfBoard = scoreboard.players.find((row) => row.isSelf);
     return {
       matchId: m.metadata.matchId,
       win: p.win,
@@ -843,7 +1066,7 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
         d: Number(p.summoner1Casts) || 0,
         f: Number(p.summoner2Casts) || 0,
       },
-      pings: selfBoard?.pings || {},
+      pings: extractPings(p),
       buildPurchases: extras.buildPurchases,
       skillOrder: extras.skillOrder,
       hasTimeline: extras.hasTimeline,
@@ -874,11 +1097,39 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
   const rankedList = Array.isArray(ranked) ? ranked : [];
   const soloEntry = rankedList.find((r) => r.queueType === 'RANKED_SOLO_5x5') || null;
   const flexEntry = rankedList.find((r) => r.queueType === 'RANKED_FLEX_SR') || null;
-  const soloRanked = formatRankEntry(soloEntry);
-  const flexRanked = formatRankEntry(flexEntry);
+  let soloRanked = formatRankEntry(soloEntry);
+  let flexRanked = formatRankEntry(flexEntry);
   const riotId = `${account.gameName}#${account.tagLine}`;
-  const lpDelta30d = await fetchOpggLpDelta30d(shard, riotId);
-  if (lpDelta30d != null) soloRanked.lpDelta30d = lpDelta30d;
+
+  const opgg = await fetchOpggProfileExtras(shard, riotId);
+  if ((!soloRanked.rankTier || soloRanked.rank === 'Unranked') && opgg?.solo?.rankTier) {
+    soloRanked = opgg.solo;
+  }
+  if ((!flexRanked.rankTier || flexRanked.rank === 'Unranked') && opgg?.flex?.rankTier) {
+    flexRanked = opgg.flex;
+  }
+  if (opgg?.lpDelta30d != null) soloRanked.lpDelta30d = opgg.lpDelta30d;
+
+  // Prefer Solo card rank for header when Riot league entries were empty.
+  const headerRank = soloRanked.rankTier
+    ? {
+      rank: soloRanked.rank,
+      lp: soloRanked.lp,
+      wins: soloRanked.wins,
+      losses: soloRanked.losses,
+      rankTier: soloRanked.rankTier,
+      rankDivision: soloRanked.rankDivision,
+      estMmr: soloRanked.estMmr ?? estMmr,
+    }
+    : {
+      rank: rankedInfo.rank,
+      lp: rankedInfo.lp,
+      wins: rankedInfo.wins,
+      losses: rankedInfo.losses,
+      rankTier: rankedInfo.rankTier,
+      rankDivision: rankedInfo.rankDivision,
+      estMmr,
+    };
 
   const champMap = {};
   recentGames.forEach((g) => {
@@ -926,6 +1177,10 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     avgKp: Math.round(kpVal * 100),
   };
 
+  const rolePerformance = career?.rolePerformance || aggregateRolePerformance(recentGames);
+  const playedWith = career?.playedWith || aggregatePlayedWith(recentGames, puuid);
+  const totalPings = career?.totalPings || aggregateTotalPings(recentGames);
+
   return {
     riotId,
     gameName: account.gameName,
@@ -936,19 +1191,24 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     matchRegion,
     profileIconId: account.profileIconId || 29,
     summonerLevel: account.summonerLevel ?? null,
-    rank: rankedInfo.rank,
+    rank: headerRank.rank,
     ladderRank,
-    lp: rankedInfo.lp,
-    estMmr,
-    rankTier: rankedInfo.rankTier,
-    rankDivision: rankedInfo.rankDivision,
-    wins: rankedInfo.wins,
-    losses: rankedInfo.losses,
+    lp: headerRank.lp,
+    estMmr: headerRank.estMmr,
+    rankTier: headerRank.rankTier,
+    rankDivision: headerRank.rankDivision,
+    wins: headerRank.wins,
+    losses: headerRank.losses,
     solo: soloRanked,
     flex: flexRanked,
     seasonPeak: null,
     overview,
     championPool,
+    rolePerformance,
+    playedWith,
+    totalPings,
+    careerSidebar: Boolean(career?.games),
+    careerGames: career?.games || 0,
     stats: {
       kda: kdaVal.toFixed(1),
       kdaDelta: deltas.kda.delta, kdaDeltaDir: deltas.kda.dir,
@@ -1070,4 +1330,25 @@ async function getLiveGame(riotFetch, { gameName, tagLine, platform, region }) {
   return data;
 }
 
-module.exports = { getDashboard, getLiveGame, getMatchTimelineDetails, MODE_QUEUE };
+async function getCareerSidebar(riotFetch, { gameName, tagLine, platform, region }) {
+  const { lookupAccount, matchRegionOf } = require('./web-api');
+  const account = await lookupAccount(riotFetch, { gameName, tagLine, platform, region });
+  const matchRegion = account.region || matchRegionOf(account.platform);
+  const data = await loadCareerSidebar(riotFetch, account.puuid, matchRegion);
+  return {
+    rolePerformance: data.rolePerformance,
+    playedWith: data.playedWith,
+    totalPings: data.totalPings,
+    careerSidebar: true,
+    careerGames: data.games,
+    puuid: account.puuid,
+  };
+}
+
+module.exports = {
+  getDashboard,
+  getLiveGame,
+  getMatchTimelineDetails,
+  getCareerSidebar,
+  MODE_QUEUE,
+};

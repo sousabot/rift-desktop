@@ -259,7 +259,7 @@ function registerWebApi(router) {
     };
   });
 
-  const { getDashboard, getLiveGame, getMatchTimelineDetails } = require('./dashboard');
+  const { getDashboard, getLiveGame, getMatchTimelineDetails, getCareerSidebar } = require('./dashboard');
 
   router.get('/v1/web/dashboard', async (req, url, riotFetch) => {
     const gameName = url.searchParams.get('gameName') || url.searchParams.get('name') || '';
@@ -272,6 +272,14 @@ function registerWebApi(router) {
     return getDashboard(riotFetch, {
       gameName, tagLine, platform, region, mode, queue, count,
     });
+  });
+
+  router.get('/v1/web/career-sidebar', async (req, url, riotFetch) => {
+    const gameName = url.searchParams.get('gameName') || url.searchParams.get('name') || '';
+    const tagLine = url.searchParams.get('tagLine') || url.searchParams.get('tag') || '';
+    const platform = url.searchParams.get('platform') || 'euw1';
+    const region = url.searchParams.get('region') || '';
+    return getCareerSidebar(riotFetch, { gameName, tagLine, platform, region });
   });
 
   router.get('/v1/web/live', async (req, url, riotFetch) => {

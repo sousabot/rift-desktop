@@ -1,17 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { getDashboard, getLiveGame } from '../api';
+import { getCareerSidebar, getDashboard, getLiveGame } from '../api';
 import { useSession } from '../session';
 import {
   champIconUrl,
   ddragonVersion,
+  deriveDashboardExtras,
   getRuneIndex,
   itemIconUrl,
   parseRiotIdInput,
+  pingIconUrl,
   platformShort,
   profileIconUrl,
   rankColor,
   rankImg,
+  roleIconUrl,
   runeIconUrl,
   summonerIconUrl,
 } from '../lib';
@@ -144,6 +147,138 @@ function groupByDay(games) {
     map.get(key).games.push(g);
   });
   return groups;
+}
+
+function wrClass(wr, games) {
+  if (games === 0 || wr == null) return '';
+  if (wr >= 52) return 'is-up';
+  if (wr < 48) return 'is-down';
+  return '';
+}
+
+function truncateName(name, max = 14) {
+  const s = String(name || '');
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+function RolePerformanceCard({ rows, career, careerGames, recentCount, loading }) {
+  if (!rows?.length) {
+    return (
+      <article className="wd-side-card">
+        <header>
+          <h3>Role Performance</h3>
+          <SideScopeNote career={career} careerGames={careerGames} recentCount={recentCount} loading={loading} />
+        </header>
+        <p className="muted" style={{ padding: '4px 0 0' }}>No role data yet.</p>
+      </article>
+    );
+  }
+  return (
+    <article className="wd-side-card">
+      <header>
+        <h3>Role Performance</h3>
+        <SideScopeNote career={career} careerGames={careerGames} recentCount={recentCount} loading={loading} />
+      </header>
+      <div className="wd-role-table-head">
+        <span>Role</span>
+        <span>Games</span>
+        <span>WR</span>
+      </div>
+      {rows.map((row) => (
+        <div key={row.roleKey} className="wd-role-table-row">
+          <div>
+            {roleIconUrl(row.roleKey) ? (
+              <img src={roleIconUrl(row.roleKey)} alt="" className="wd-role-icon" />
+            ) : null}
+            <span>{row.role}</span>
+          </div>
+          <span>{row.games}</span>
+          <span className={wrClass(row.wr, row.games)}>{row.wr}%</span>
+        </div>
+      ))}
+    </article>
+  );
+}
+
+function PlayedWithCard({ rows, version, career, careerGames, recentCount, loading }) {
+  if (!rows?.length) {
+    return (
+      <article className="wd-side-card">
+        <header>
+          <h3>Played With</h3>
+          <SideScopeNote career={career} careerGames={careerGames} recentCount={recentCount} loading={loading} />
+        </header>
+        <p className="muted" style={{ padding: '4px 0 0' }}>No frequent teammates yet.</p>
+      </article>
+    );
+  }
+  return (
+    <article className="wd-side-card">
+      <header>
+        <h3>Played With</h3>
+        <SideScopeNote career={career} careerGames={careerGames} recentCount={recentCount} loading={loading} />
+      </header>
+      <div className="wd-played-list">
+        {rows.map((row) => (
+          <div key={row.puuid} className="wd-played-row">
+            <ChampImg name={row.champion} size={28} version={version} />
+            <div className="wd-played-meta">
+              <strong title={row.riotId || row.gameName}>{truncateName(row.gameName)}</strong>
+              <span>{row.games} Games</span>
+            </div>
+            <div className="wd-played-stats">
+              <strong className={wrClass(row.wr)}>{row.wr}% WR</strong>
+              <span>{row.wins}W - {row.losses}L</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+const TOTAL_PING_KEYS = [
+  { key: 'onMyWay', label: 'OMW' },
+  { key: 'assist', label: 'Assist' },
+  { key: 'missing', label: 'Missing' },
+  { key: 'needVision', label: 'Need Vision' },
+  { key: 'enemyVision', label: 'Enemy Vision' },
+  { key: 'allIn', label: 'All-In' },
+];
+
+function SideScopeNote({ career, careerGames, recentCount, loading }) {
+  if (loading) return <span className="wd-side-scope is-loading">Loading career…</span>;
+  if (career && careerGames) {
+    return <span className="wd-side-scope">All queues · {careerGames} games</span>;
+  }
+  return <span className="wd-side-scope">Last {recentCount || 0} games</span>;
+}
+
+function TotalPingsCard({ totalPings, career, careerGames, recentCount, loading }) {
+  const totals = totalPings?.totals || {};
+  const averages = totalPings?.averages || {};
+  return (
+    <article className="wd-side-card">
+      <header>
+        <h3>Total Pings</h3>
+        <SideScopeNote
+          career={career}
+          careerGames={careerGames}
+          recentCount={recentCount}
+          loading={loading}
+        />
+      </header>
+      <div className="wd-pings-grid">
+        {TOTAL_PING_KEYS.map((row) => (
+          <div key={row.key} className="wd-ping-cell" title={row.label}>
+            <img src={pingIconUrl(row.key)} alt={row.label} />
+            <strong>{totals[row.key] ?? 0}</strong>
+            <span>({averages[row.key] ?? 0})</span>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
 }
 
 function RankCard({ title, ranked, ladderRank, sparkData }) {
@@ -311,6 +446,7 @@ export default function Dashboard() {
   const [expandedId, setExpandedId] = useState(null);
   const [liveGame, setLiveGame] = useState(null);
   const [query, setQuery] = useState(activeId);
+  const [careerLoading, setCareerLoading] = useState(false);
   const loadSeq = useRef(0);
 
   useEffect(() => {
@@ -370,6 +506,40 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, session?.platform, session?.region]);
 
+  // Role / Played With / Pings from all-queue career history (not last 20 Solo).
+  useEffect(() => {
+    if (!profile?.puuid || profile.careerSidebar) {
+      setCareerLoading(false);
+      return undefined;
+    }
+    const parsed = parseRiotIdInput(activeId);
+    if (!parsed.gameName || !parsed.tagLine) return undefined;
+    let cancelled = false;
+    setCareerLoading(true);
+    getCareerSidebar({
+      gameName: parsed.gameName,
+      tagLine: parsed.tagLine,
+      platform: lookup.platform,
+      region: lookup.region,
+    }).then((career) => {
+      if (cancelled || !career?.careerSidebar) return;
+      setProfile((prev) => {
+        if (!prev || prev.puuid !== career.puuid) return prev;
+        return {
+          ...prev,
+          rolePerformance: career.rolePerformance,
+          playedWith: career.playedWith,
+          totalPings: career.totalPings,
+          careerSidebar: true,
+          careerGames: career.careerGames,
+        };
+      });
+    }).catch(() => { /* keep recent-game fallback */ })
+      .finally(() => { if (!cancelled) setCareerLoading(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.puuid, profile?.careerSidebar, activeId]);
+
   useEffect(() => {
     if (!profile?.riotId) return undefined;
     let cancelled = false;
@@ -414,6 +584,7 @@ export default function Dashboard() {
   const pool = profile?.championPool || [];
   const topChamps = pool.slice(0, 3);
   const inLive = !!(liveGame && (liveGame.blue?.length || liveGame.red?.length));
+  const sideExtras = useMemo(() => deriveDashboardExtras(profile), [profile]);
 
   return (
     <div className="wd-page">
@@ -608,6 +779,29 @@ export default function Dashboard() {
                   {!pool.length ? <p className="muted" style={{ padding: '8px 0 0' }}>No games in this queue.</p> : null}
                   <button type="button" className="wd-all-btn" onClick={() => setTab('champions')}>All</button>
                 </article>
+
+                <RolePerformanceCard
+                  rows={sideExtras.rolePerformance}
+                  career={profile.careerSidebar}
+                  careerGames={profile.careerGames}
+                  recentCount={overview.games}
+                  loading={careerLoading}
+                />
+                <PlayedWithCard
+                  rows={sideExtras.playedWith}
+                  version={version}
+                  career={profile.careerSidebar}
+                  careerGames={profile.careerGames}
+                  recentCount={overview.games}
+                  loading={careerLoading}
+                />
+                <TotalPingsCard
+                  totalPings={sideExtras.totalPings}
+                  career={profile.careerSidebar}
+                  careerGames={profile.careerGames}
+                  recentCount={overview.games}
+                  loading={careerLoading}
+                />
               </aside>
 
               <section className="wd-main">

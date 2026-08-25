@@ -105,6 +105,177 @@ export function summonerIconUrl(id, version = '16.16.1') {
   return `https://ddragon.leagueoflegends.com/cdn/${version}/img/spell/${key}.png`;
 }
 
+const PING_CDN = 'https://raw.communitydragon.org/latest/game/assets/ux/minimap/pings/';
+const PING_FILES = {
+  assist: 'assist.png',
+  onMyWay: 'on_my_way_new.png',
+  missing: 'mia_new.png',
+  needVision: 'need_ward.png',
+  enemyVision: 'area_is_warded_small_red_new.png',
+  allIn: 'bait.png',
+  danger: 'caution.png',
+  push: 'push.png',
+};
+
+export function pingIconUrl(key) {
+  const file = PING_FILES[key];
+  return file ? `${PING_CDN}${file}` : '';
+}
+
+const ROLE_ICON_CDN = 'https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-parties/global/default/';
+const ROLE_ICON_FILES = {
+  TOP: 'icon-position-top.png',
+  JUNGLE: 'icon-position-jungle.png',
+  MIDDLE: 'icon-position-middle.png',
+  BOTTOM: 'icon-position-bottom.png',
+  UTILITY: 'icon-position-utility.png',
+};
+
+export function roleIconUrl(roleKey) {
+  const file = ROLE_ICON_FILES[String(roleKey || '').toUpperCase()];
+  return file ? `${ROLE_ICON_CDN}${file}` : '';
+}
+
+const ROLE_PERF_ORDER = ['BOTTOM', 'JUNGLE', 'MIDDLE', 'TOP', 'UTILITY'];
+const ROLE_PERF_LABELS = {
+  BOTTOM: 'ADC',
+  JUNGLE: 'JUNGLE',
+  MIDDLE: 'MID',
+  TOP: 'TOP',
+  UTILITY: 'SUPPORT',
+};
+const TOTAL_PING_AGG_KEYS = ['assist', 'onMyWay', 'missing', 'needVision', 'enemyVision', 'allIn'];
+
+/** Prefer server career sidebar when present; else derive from recentGames. */
+export function deriveDashboardExtras(profile) {
+  const games = Array.isArray(profile?.recentGames) ? profile.recentGames : [];
+  const apiRoles = Array.isArray(profile?.rolePerformance) ? profile.rolePerformance : [];
+  const apiPlayed = Array.isArray(profile?.playedWith) ? profile.playedWith : [];
+  const useCareer = Boolean(profile?.careerSidebar)
+    || (apiRoles.reduce((s, r) => s + (Number(r.games) || 0), 0) > games.length);
+
+  const rolePerformance = useCareer && apiRoles.length >= 5
+    ? apiRoles
+    : deriveRolePerformance(games);
+  const playedWith = (useCareer && apiPlayed.length
+    ? apiPlayed
+    : derivePlayedWith(games, profile?.puuid)
+  ).slice(0, 4);
+  const totalPings = useCareer && profile?.totalPings?.totals
+    ? profile.totalPings
+    : deriveTotalPings(games);
+  return { rolePerformance, playedWith, totalPings };
+}
+
+function deriveRolePerformance(games) {
+  const map = {};
+  ROLE_PERF_ORDER.forEach((key) => {
+    map[key] = { wins: 0, losses: 0 };
+  });
+  games.forEach((g) => {
+    const key = String(g.roleKey || '').toUpperCase();
+    if (!map[key]) return;
+    map[key][g.win ? 'wins' : 'losses'] += 1;
+  });
+  return ROLE_PERF_ORDER
+    .map((key) => {
+      const d = map[key];
+      const count = d.wins + d.losses;
+      return {
+        roleKey: key,
+        role: ROLE_PERF_LABELS[key],
+        games: count,
+        wins: d.wins,
+        losses: d.losses,
+        wr: count ? Math.round((d.wins / count) * 100) : 0,
+      };
+    })
+    .sort((a, b) => b.games - a.games || a.role.localeCompare(b.role));
+}
+
+function derivePlayedWith(games, selfPuuid) {
+  const map = {};
+  games.forEach((g) => {
+    const players = g.scoreboard?.players || [];
+    const self = players.find((p) => p.isSelf)
+      || players.find((p) => selfPuuid && p.puuid === selfPuuid);
+    if (!self) return;
+    players
+      .filter((p) => p.teamId === self.teamId && p.puuid && p.puuid !== self.puuid)
+      .forEach((p) => {
+        if (!map[p.puuid]) {
+          map[p.puuid] = {
+            puuid: p.puuid,
+            gameName: p.gameName || p.champion || 'Unknown',
+            tagLine: p.tagLine || '',
+            riotId: p.riotId || '',
+            champion: p.champion,
+            wins: 0,
+            losses: 0,
+          };
+        }
+        const row = map[p.puuid];
+        row.champion = p.champion || row.champion;
+        if (p.gameName) row.gameName = p.gameName;
+        if (p.tagLine) row.tagLine = p.tagLine;
+        if (p.riotId) row.riotId = p.riotId;
+        row[g.win ? 'wins' : 'losses'] += 1;
+      });
+  });
+  return Object.values(map)
+    .map((d) => {
+      const count = d.wins + d.losses;
+      return { ...d, games: count, wr: count ? Math.round((d.wins / count) * 100) : 0 };
+    })
+    .sort((a, b) => b.games - a.games || b.wr - a.wr)
+    .slice(0, 4);
+}
+
+function pingValue(p, key) {
+  if (!p) return 0;
+  if (Number(p[key])) return Number(p[key]) || 0;
+  // Older API payloads used danger/push instead of needVision/allIn.
+  if (key === 'needVision') return Number(p.needVision) || 0;
+  if (key === 'allIn') return Number(p.allIn) || Number(p.push) || 0;
+  return 0;
+}
+
+function deriveTotalPings(games) {
+  const totals = Object.fromEntries(TOTAL_PING_AGG_KEYS.map((k) => [k, 0]));
+  let counted = 0;
+  games.forEach((g) => {
+    if (!g.pings) return;
+    counted += 1;
+    TOTAL_PING_AGG_KEYS.forEach((k) => { totals[k] += pingValue(g.pings, k); });
+  });
+  const n = Math.max(1, counted);
+  return {
+    games: counted,
+    totals,
+    averages: Object.fromEntries(
+      TOTAL_PING_AGG_KEYS.map((k) => [k, Number((totals[k] / n).toFixed(1))])
+    ),
+  };
+}
+
+const champKitCache = new Map();
+
+/** Fetch champion kit (passive + QWER spells) from Data Dragon; cached per version+id. */
+export async function getChampionKit(name, version = '16.16.1') {
+  const id = champDdragonId(name);
+  const cacheKey = `${version}:${id}`;
+  if (champKitCache.has(cacheKey)) return champKitCache.get(cacheKey);
+  const promise = fetch(`https://ddragon.leagueoflegends.com/cdn/${version}/data/en_US/champion/${id}.json`)
+    .then((r) => {
+      if (!r.ok) throw new Error(`champion ${id}`);
+      return r.json();
+    })
+    .then((data) => data?.data?.[id] || null)
+    .catch(() => null);
+  champKitCache.set(cacheKey, promise);
+  return promise;
+}
+
 const SHARD_CDN = 'https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/perk-images/statmods/';
 const SHARD_ICONS = {
   5001: 'statmodshealthplusicon.png',

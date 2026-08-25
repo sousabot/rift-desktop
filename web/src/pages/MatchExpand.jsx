@@ -2,8 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { getMatchTimeline } from '../api';
 import {
   champIconUrl,
+  getChampionKit,
   itemIconUrl,
+  pingIconUrl,
   runeIconUrl,
+  spellIconUrl,
   summonerIconUrl,
 } from '../lib';
 
@@ -153,6 +156,28 @@ function DetailsTab({ game, version }) {
   const skills = game.skillOrder || [];
   const casts = game.spellCasts || {};
   const pings = game.pings || {};
+  const [dSpell, fSpell] = game.spells || [];
+  const [kit, setKit] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setKit(null);
+    if (!game.champion || !version) return undefined;
+    getChampionKit(game.champion, version).then((data) => {
+      if (!cancelled) setKit(data);
+    });
+    return () => { cancelled = true; };
+  }, [game.champion, version]);
+
+  const abilityIcons = useMemo(() => {
+    const spells = kit?.spells || [];
+    return {
+      Q: spells[0]?.image?.full ? spellIconUrl(spells[0].image.full, version) : '',
+      W: spells[1]?.image?.full ? spellIconUrl(spells[1].image.full, version) : '',
+      E: spells[2]?.image?.full ? spellIconUrl(spells[2].image.full, version) : '',
+      R: spells[3]?.image?.full ? spellIconUrl(spells[3].image.full, version) : '',
+    };
+  }, [kit, version]);
 
   const buildGroups = useMemo(() => {
     if (!purchases.length) return [];
@@ -255,7 +280,11 @@ function DetailsTab({ game, version }) {
               { slot: 4, key: 'R', color: 'r' },
             ].map((row) => (
               <div key={row.key} className="wd-skill-row">
-                <span className={`wd-skill-key is-${row.color}`}>{row.key}</span>
+                <span className={`wd-skill-key is-${row.color}`}>
+                  {abilityIcons[row.key] ? (
+                    <img src={abilityIcons[row.key]} alt={row.key} title={row.key} />
+                  ) : row.key}
+                </span>
                 {(skillGrid[row.slot] || []).map((lvl, i) => (
                   <span key={i} className={`wd-skill-cell${lvl ? ` is-${row.color}` : ''}`}>
                     {lvl || ''}
@@ -274,12 +303,20 @@ function DetailsTab({ game, version }) {
           <h4>Spell Casted</h4>
           <div className="wd-cast-row">
             {[
-              ['Q', casts.q], ['W', casts.w], ['E', casts.e], ['R', casts.r],
-              ['D', casts.d], ['F', casts.f],
-            ].map(([k, n]) => (
-              <div key={k}>
-                <span>{k}</span>
-                <strong>{n ?? 0}</strong>
+              { key: 'Q', count: casts.q, icon: abilityIcons.Q },
+              { key: 'W', count: casts.w, icon: abilityIcons.W },
+              { key: 'E', count: casts.e, icon: abilityIcons.E },
+              { key: 'R', count: casts.r, icon: abilityIcons.R },
+              { key: 'D', count: casts.d, icon: dSpell ? summonerIconUrl(dSpell, version) : '' },
+              { key: 'F', count: casts.f, icon: fSpell ? summonerIconUrl(fSpell, version) : '' },
+            ].map((row) => (
+              <div key={row.key} title={row.key}>
+                {row.icon ? (
+                  <img className="wd-cast-icon" src={row.icon} alt={row.key} />
+                ) : (
+                  <span>{row.key}</span>
+                )}
+                <strong>{row.count ?? 0}</strong>
               </div>
             ))}
           </div>
@@ -288,16 +325,16 @@ function DetailsTab({ game, version }) {
           <h4>Pings</h4>
           <div className="wd-cast-row">
             {[
-              ['Assist', pings.assist],
-              ['OMW', pings.onMyWay],
-              ['Vision', pings.enemyVision],
-              ['Danger', pings.danger],
-              ['Missing', pings.missing],
-              ['Push', pings.push],
-            ].map(([k, n]) => (
-              <div key={k}>
-                <span>{k}</span>
-                <strong>{n ?? 0}</strong>
+              { key: 'Assist', ping: 'assist', count: pings.assist },
+              { key: 'OMW', ping: 'onMyWay', count: pings.onMyWay },
+              { key: 'Missing', ping: 'missing', count: pings.missing },
+              { key: 'Vision', ping: 'needVision', count: pings.needVision },
+              { key: 'Enemy Vis', ping: 'enemyVision', count: pings.enemyVision },
+              { key: 'All-In', ping: 'allIn', count: pings.allIn },
+            ].map((row) => (
+              <div key={row.key} title={row.key}>
+                <img className="wd-cast-icon is-ping" src={pingIconUrl(row.ping)} alt={row.key} />
+                <strong>{row.count ?? 0}</strong>
               </div>
             ))}
           </div>

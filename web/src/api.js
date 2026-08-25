@@ -83,6 +83,16 @@ export function getDashboard({
   return getJson(`/v1/web/dashboard?${q.toString()}`, { timeoutMs: 120000 });
 }
 
+export function getCareerSidebar({ gameName, tagLine, platform = 'euw1', region } = {}) {
+  const q = new URLSearchParams({
+    gameName,
+    tagLine,
+    platform,
+  });
+  if (region) q.set('region', region);
+  return getJson(`/v1/web/career-sidebar?${q.toString()}`, { timeoutMs: 180000 });
+}
+
 export function getLiveGame({ gameName, tagLine, platform = 'euw1', region } = {}) {
   const q = new URLSearchParams({ gameName, tagLine, platform });
   if (region) q.set('region', region);
