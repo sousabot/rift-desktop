@@ -129,6 +129,43 @@ function soloRank(entries, queue) {
   };
 }
 
+function formatRankEntry(pick) {
+  if (!pick?.tier) {
+    return {
+      rank: 'Unranked',
+      rankTier: null,
+      rankDivision: null,
+      lp: null,
+      wins: null,
+      losses: null,
+      estMmr: null,
+    };
+  }
+  const apex = ['MASTER', 'GRANDMASTER', 'CHALLENGER'].includes(String(pick.tier).toUpperCase());
+  const division = !apex && pick.rank ? ` ${pick.rank}` : '';
+  return {
+    rank: `${formatTier(pick.tier)}${division}`,
+    rankTier: pick.tier,
+    rankDivision: apex ? null : pick.rank || null,
+    lp: pick.leaguePoints ?? null,
+    wins: pick.wins ?? null,
+    losses: pick.losses ?? null,
+    estMmr: estimateRankMmr(pick.tier, pick.rank, pick.leaguePoints),
+  };
+}
+
+function roleLabel(position) {
+  const map = {
+    TOP: 'Top',
+    JUNGLE: 'Jungle',
+    MIDDLE: 'Mid',
+    BOTTOM: 'Bot',
+    UTILITY: 'Support',
+  };
+  const key = String(position || '').toUpperCase();
+  return map[key] || null;
+}
+
 function scale(value, par, excellent) {
   const v = Number(value);
   if (!Number.isFinite(v) || v <= 0) return 0;
@@ -383,11 +420,25 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     const enemyTeam = m.info.participants
       .filter((pp) => pp.teamId !== p.teamId)
       .map((pp) => pp.championName);
+    const lanePos = p.teamPosition || p.individualPosition || '';
+    const opponent = lanePos
+      ? m.info.participants.find(
+        (pp) => pp.teamId !== p.teamId
+          && (pp.teamPosition === lanePos || pp.individualPosition === lanePos)
+      )
+      : null;
+    const primary = p.perks?.styles?.find((s) => s.description === 'primaryStyle') || p.perks?.styles?.[0];
+    const sub = p.perks?.styles?.find((s) => s.description === 'subStyle') || p.perks?.styles?.[1];
+    const primaryPerks = (primary?.selections || []).map((s) => s.perk);
     const gdScore = gdScoreFromParticipant(p, m);
+    const kp = teamKills > 0 ? (p.kills + p.assists) / teamKills : 0;
     return {
       matchId: m.metadata.matchId,
       win: p.win,
       champion: p.championName,
+      champLevel: Number(p.champLevel) || null,
+      role: roleLabel(lanePos),
+      roleKey: String(lanePos || '').toUpperCase() || null,
       kills: p.kills,
       deaths: p.deaths,
       assists: p.assists,
@@ -396,6 +447,7 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
       durationSec: Math.round(m.info.gameDuration % 60),
       kda,
       ago: timeAgo(m.info.gameEndTimestamp),
+      endedAt: m.info.gameEndTimestamp || null,
       gdScore,
       queueId: m.info.queueId,
       queueLabel: QUEUE_NAMES[m.info.queueId] || 'Other',
@@ -403,7 +455,8 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
       region: PLATFORM_LABEL[shard] || String(shard).toUpperCase(),
       gpm: p.goldEarned / mins,
       visionPerMin: p.visionScore / mins,
-      kp: teamKills > 0 ? (p.kills + p.assists) / teamKills : 0,
+      kp,
+      kpPct: Math.round(kp * 100),
       goldDiff15,
       kaDiff15,
       earlyScore: phases.early,
@@ -412,10 +465,19 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
       deaths4: p.deaths,
       killsAssists: p.kills + p.assists,
       csm: p.totalMinionsKilled + p.neutralMinionsKilled,
+      csPerMin: Number(((p.totalMinionsKilled + p.neutralMinionsKilled) / mins).toFixed(1)),
+      opponent: opponent?.championName || enemyTeam[0] || null,
       allyTeam,
       enemyTeam,
       allyBans: teamBans(m, p.teamId),
       enemyBans: teamBans(m, p.teamId === 200 ? 100 : 200),
+      items: [p.item0, p.item1, p.item2, p.item3, p.item4, p.item5, p.item6],
+      spells: [p.summoner1Id, p.summoner2Id],
+      runes: {
+        keystone: primaryPerks[0] || null,
+        primary: primary?.style || null,
+        sub: sub?.style || null,
+      },
     };
   }).filter(Boolean);
 
@@ -439,6 +501,58 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
   const estMmr = estimateMmrFromRecord(rankedInfo.estMmr, rankedInfo.wins, rankedInfo.losses)
     ?? rankedInfo.estMmr;
 
+  const rankedList = Array.isArray(ranked) ? ranked : [];
+  const soloEntry = rankedList.find((r) => r.queueType === 'RANKED_SOLO_5x5') || null;
+  const flexEntry = rankedList.find((r) => r.queueType === 'RANKED_FLEX_SR') || null;
+  const soloRanked = formatRankEntry(soloEntry);
+  const flexRanked = formatRankEntry(flexEntry);
+
+  const champMap = {};
+  recentGames.forEach((g) => {
+    if (!champMap[g.champion]) {
+      champMap[g.champion] = { wins: 0, losses: 0, kdas: [], css: [], kills: 0, deaths: 0, assists: 0 };
+    }
+    const row = champMap[g.champion];
+    row[g.win ? 'wins' : 'losses'] += 1;
+    row.kdas.push((g.kills + g.assists) / Math.max(1, g.deaths));
+    row.css.push(g.cs / Math.max(1, g.durationMin));
+    row.kills += g.kills;
+    row.deaths += g.deaths;
+    row.assists += g.assists;
+  });
+  const championPool = Object.entries(champMap)
+    .sort((a, b) => (b[1].wins + b[1].losses) - (a[1].wins + a[1].losses))
+    .map(([champion, d]) => {
+      const games = d.wins + d.losses;
+      return {
+        champion,
+        games,
+        wins: d.wins,
+        losses: d.losses,
+        wr: games ? Math.round((d.wins / games) * 100) : 0,
+        kda: avg(d.kdas).toFixed(1),
+        cs: avg(d.css).toFixed(1),
+        kills: Number((d.kills / games).toFixed(1)),
+        deaths: Number((d.deaths / games).toFixed(1)),
+        assists: Number((d.assists / games).toFixed(1)),
+      };
+    });
+
+  const recentWins = recentGames.filter((g) => g.win).length;
+  const recentLosses = recentGames.length - recentWins;
+  const overview = {
+    games: recentGames.length,
+    wins: recentWins,
+    losses: recentLosses,
+    winrate: recentGames.length ? Math.round((recentWins / recentGames.length) * 100) : 0,
+    avgKills: Number(avg(recentGames.map((g) => g.kills)).toFixed(1)),
+    avgDeaths: Number(avg(recentGames.map((g) => g.deaths)).toFixed(1)),
+    avgAssists: Number(avg(recentGames.map((g) => g.assists)).toFixed(1)),
+    avgKda: kdaVal.toFixed(1),
+    avgGdScore: gdScoreVal.toFixed(1),
+    avgKp: Math.round(kpVal * 100),
+  };
+
   return {
     riotId: `${account.gameName}#${account.tagLine}`,
     gameName: account.gameName,
@@ -457,7 +571,11 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     rankDivision: rankedInfo.rankDivision,
     wins: rankedInfo.wins,
     losses: rankedInfo.losses,
+    solo: soloRanked,
+    flex: flexRanked,
     seasonPeak: null,
+    overview,
+    championPool,
     stats: {
       kda: kdaVal.toFixed(1),
       kdaDelta: deltas.kda.delta, kdaDeltaDir: deltas.kda.dir,

@@ -1,44 +1,93 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { getDashboard, getLiveGame } from '../api';
 import { useSession } from '../session';
 import {
   champIconUrl,
-  champLoadingUrl,
-  champSplashUrl,
   ddragonVersion,
-  formatMmr,
-  mmrToRank,
+  getRuneIndex,
+  itemIconUrl,
   parseRiotIdInput,
   platformShort,
   profileIconUrl,
   rankColor,
-  rankEmblemClass,
   rankImg,
+  runeIconUrl,
+  summonerIconUrl,
 } from '../lib';
 import './Dashboard.css';
 
-const MODE_LABEL = { All: 'All Queues', Solo: 'Solo/Duo', Flex: 'Flex', Aram: 'ARAM', Normal: 'Normal' };
 const MODE_KEYS = ['All', 'Solo', 'Flex', 'Aram', 'Normal'];
-const GD_SCORE_HINT = 'Rift Score (0–100): role-weighted from KDA, kill participation, damage share, CS/min, vision, and result.';
+const ROLE_FILTERS = [
+  { key: 'ALL', label: 'All' },
+  { key: 'TOP', label: 'Top' },
+  { key: 'JUNGLE', label: 'Jng' },
+  { key: 'MIDDLE', label: 'Mid' },
+  { key: 'BOTTOM', label: 'Bot' },
+  { key: 'UTILITY', label: 'Sup' },
+];
 
-const fmtElapsed = (seconds = 0) => {
-  const m = Math.floor(seconds / 60);
-  const s = Math.max(0, Math.floor(seconds % 60));
-  return `${m}:${String(s).padStart(2, '0')}`;
-};
-
-function padTeamBans(bans = [], teamId) {
-  const rows = bans.filter((b) => Number(b.teamId) === Number(teamId)).slice(0, 5);
-  while (rows.length < 5) rows.push({ champion: null });
-  return rows;
+function WinDonut({ winrate = 0, wins = 0, losses = 0 }) {
+  const size = 84;
+  const stroke = 8;
+  const r = (size / 2) - stroke;
+  const circ = 2 * Math.PI * r;
+  const pct = Math.max(0, Math.min(100, Number(winrate) || 0)) / 100;
+  return (
+    <div className="wd-donut" aria-label={`${winrate}% winrate`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke="#5ba2ff"
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={`${pct * circ} ${circ}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+        <text x={size / 2} y={size / 2 - 2} textAnchor="middle" className="wd-donut-pct">{winrate}%</text>
+        <text x={size / 2} y={size / 2 + 14} textAnchor="middle" className="wd-donut-sub">{wins}W {losses}L</text>
+      </svg>
+    </div>
+  );
 }
 
-function Sparkline({ data = [], up = true }) {
-  const ref = useRef();
+function ScoreRing({ score, win }) {
+  const size = 44;
+  const stroke = 3.2;
+  const r = (size / 2) - stroke;
+  const circ = 2 * Math.PI * r;
+  const value = Math.max(0, Math.min(100, Number(score) || 0));
+  const pct = value / 100;
+  return (
+    <div className={`wd-score-ring ${win ? 'is-win' : 'is-loss'}`} title={`Rift Score ${value}`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={win ? '#3ecf8e' : '#ff5c68'}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={`${pct * circ} ${circ}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+        <text x={size / 2} y={size / 2 + 4} textAnchor="middle">{Math.round(value)}</text>
+      </svg>
+    </div>
+  );
+}
+
+function Sparkline({ data = [], color = '#3ecf8e' }) {
+  const ref = useRef(null);
   useEffect(() => {
     const canvas = ref.current;
-    if (!canvas || !data.length) return;
+    if (!canvas || data.length < 2) return;
     const ctx = canvas.getContext('2d');
     const w = canvas.width;
     const h = canvas.height;
@@ -46,147 +95,183 @@ function Sparkline({ data = [], up = true }) {
     const max = Math.max(...data);
     const range = max - min || 1;
     const pts = data.map((v, i) => [
-      (i / Math.max(1, data.length - 1)) * w,
-      h - ((v - min) / range) * (h - 6) - 3,
+      (i / (data.length - 1)) * w,
+      h - ((v - min) / range) * (h - 8) - 4,
     ]);
     ctx.clearRect(0, 0, w, h);
-    const c = up ? '#3ecf8e' : '#ff5c68';
-    const grad = ctx.createLinearGradient(0, 0, w, 0);
-    grad.addColorStop(0, `${c}55`);
-    grad.addColorStop(1, c);
-    ctx.strokeStyle = grad;
-    ctx.lineWidth = 1.8;
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
     ctx.beginPath();
     pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.8;
+    ctx.lineJoin = 'round';
     ctx.stroke();
-  }, [data, up]);
-  return <canvas ref={ref} width={88} height={28} className="db-sparkline" />;
+  }, [data, color]);
+  return <canvas ref={ref} width={160} height={36} className="wd-spark" />;
 }
 
-function StatCard({ label, value, delta, deltaDir, sparkData, hint }) {
-  const isDown = deltaDir === 'down';
-  return (
-    <div className="db-stat-card" title={hint || undefined}>
-      <div className="db-stat-top">
-        <span className="db-stat-label">{label}</span>
-        <Sparkline data={sparkData} up={!isDown} />
-      </div>
-      <div className="db-stat-bottom">
-        <span className="db-stat-value">{value}</span>
-        <span className={`db-stat-delta-pill db-stat-delta-pill--${deltaDir || 'flat'}`}>
-          <span className="db-stat-delta-dot" />
-          {delta || '+0.0'} <span className="db-stat-delta-sub">vs 1w</span>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function ChampionIcon({ name, size = 36, team, rounded = false }) {
-  const [version, setVersion] = useState('16.16.1');
-  const [src, setSrc] = useState(() => champIconUrl(name));
-  const [failed, setFailed] = useState(false);
-  useEffect(() => { ddragonVersion().then(setVersion); }, []);
-  useEffect(() => {
-    setSrc(champIconUrl(name, version));
-    setFailed(false);
-  }, [name, version]);
-  const teamClass = team === 'blue' ? ' db-champ-icon--blue' : team === 'red' ? ' db-champ-icon--red' : '';
-  if (failed || !name) {
-    return (
-      <span
-        className={`db-champ-icon is-empty${rounded ? ' db-champ-icon--rounded' : ''}${teamClass}`}
-        style={{ width: size, height: size, display: 'inline-block' }}
-        title={name || ''}
-      />
-    );
-  }
+function ChampImg({ name, size = 36, version }) {
+  if (!name) return <span className="wd-champ-empty" style={{ width: size, height: size }} />;
   return (
     <img
-      src={src}
+      src={champIconUrl(name, version)}
       alt={name}
       title={name}
-      onError={() => {
-        const fallback = champIconUrl('Aatrox', version);
-        if (src === fallback) {
-          setFailed(true);
-          return;
-        }
-        setSrc(fallback);
-      }}
-      className={`db-champ-icon${rounded ? ' db-champ-icon--rounded' : ''}${teamClass}`}
-      style={{ width: size, height: size }}
+      width={size}
+      height={size}
+      className="wd-champ"
+      onError={(e) => { e.currentTarget.src = champIconUrl('Aatrox', version); }}
     />
   );
 }
 
-function ScoreRing({ label, value, max = 100, color, size = 40 }) {
-  const r = size / 2 - 5;
-  const circ = 2 * Math.PI * r;
-  const pct = Math.min((Number(value) || 0) / max, 1);
-  const cx = size / 2;
-  return (
-    <div className="db-score-ring">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle cx={cx} cy={cx} r={r} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="3.5" />
-        <circle
-          cx={cx} cy={cx} r={r} fill="none"
-          stroke={color} strokeWidth="3.5"
-          strokeDasharray={`${pct * circ} ${circ}`}
-          strokeLinecap="round"
-          transform={`rotate(-90 ${cx} ${cx})`}
-        />
-        <text x={cx} y={cx + 4} textAnchor="middle" fill="#fff" fontSize={10} fontWeight="700">{value}</text>
-      </svg>
-      <span className="db-score-ring-label">{label}</span>
-    </div>
-  );
+function dayKey(ts) {
+  if (!ts) return 'Unknown';
+  const d = new Date(ts);
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
-function LPRing({ lp, win }) {
-  const r = 10;
-  const circ = 2 * Math.PI * r;
-  const pct = Math.min((Number(lp) || 0) / 100, 1);
-  const c = win ? '#3ecf8e' : '#ff5c68';
-  return (
-    <div className="db-lp-ring" title={`Rift Score ${lp}`}>
-      <svg width="28" height="28" viewBox="0 0 28 28">
-        <circle cx="14" cy="14" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2.5" />
-        <circle
-          cx="14" cy="14" r={r} fill="none" stroke={c} strokeWidth="2.5"
-          strokeDasharray={`${pct * circ} ${circ}`} strokeLinecap="round"
-          transform="rotate(-90 14 14)"
-        />
-        <text x="14" y="18" textAnchor="middle" fill="#fff" fontSize="7" fontWeight="700">{lp}</text>
-      </svg>
-    </div>
-  );
+function groupByDay(games) {
+  const groups = [];
+  const map = new Map();
+  games.forEach((g) => {
+    const key = dayKey(g.endedAt);
+    if (!map.has(key)) {
+      const row = { key, games: [] };
+      map.set(key, row);
+      groups.push(row);
+    }
+    map.get(key).games.push(g);
+  });
+  return groups;
 }
 
-function RecentGameRow({ game, active, onSelect }) {
-  const { champion, win, kills, deaths, assists, kda, ago, gdScore, queueLabel, queueType } = game;
+function RankCard({ title, ranked, ladderRank, sparkData }) {
+  const color = rankColor(ranked?.rank);
+  const wr = ranked?.wins != null
+    ? Math.round((ranked.wins / Math.max(1, ranked.wins + ranked.losses)) * 100)
+    : null;
   return (
-    <button
-      type="button"
-      className={`db-recent-row db-recent-row--${win ? 'win' : 'loss'}${active ? ' is-active' : ''}`}
-      onClick={onSelect}
-    >
-      <div className="db-recent-left">
-        <span className="db-recent-ago">{ago}</span>
-        <ChampionIcon name={champion} size={32} rounded />
+    <article className="wd-rank-card">
+      <div className="wd-rank-card-top">
+        <span className="wd-rank-card-title">{title}</span>
+        {ladderRank ? <span className="wd-rank-ladder">#{ladderRank}</span> : null}
       </div>
-      <div className="db-recent-mid">
-        <div className="db-recent-top-row">
-          <span className={`db-recent-result ${win ? 'win' : 'loss'}`}>{win ? 'WIN' : 'LOSS'}</span>
-          <span className="db-recent-queue">{queueLabel || queueType || 'Solo/Duo'}</span>
+      <div className="wd-rank-card-main">
+        {rankImg(ranked?.rank) ? (
+          <img src={rankImg(ranked.rank)} alt="" className="wd-rank-emblem" />
+        ) : (
+          <span className="wd-rank-emblem is-empty" />
+        )}
+        <div>
+          <strong style={{ color }}>{ranked?.rank || 'Unranked'}</strong>
+          <span>{ranked?.lp != null ? `${ranked.lp} LP` : '—'}</span>
         </div>
-        <span className="db-recent-kda">{kills}/{deaths}/{assists}</span>
-        <span className="db-recent-kdaval">{kda} KDA</span>
       </div>
-      <LPRing lp={gdScore} win={win} />
-    </button>
+      {ranked?.wins != null ? (
+        <div className="wd-rank-record">
+          {ranked.wins}W – {ranked.losses}L{wr != null ? ` · ${wr}%` : ''}
+        </div>
+      ) : (
+        <div className="wd-rank-record muted">No ranked games yet</div>
+      )}
+      {sparkData?.length > 1 ? (
+        <div className="wd-rank-spark">
+          <span>Rift Score trend</span>
+          <Sparkline data={sparkData} color={color} />
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function MatchRow({ game, version, runeIndex, expanded, onToggle }) {
+  const items = (game.items || []).slice(0, 7);
+  while (items.length < 7) items.push(0);
+  return (
+    <div className={`wd-match ${game.win ? 'is-win' : 'is-loss'}${expanded ? ' is-open' : ''}`}>
+      <button type="button" className="wd-match-row" onClick={onToggle}>
+        <div className="wd-match-meta">
+          <span className={`wd-match-result ${game.win ? 'win' : 'loss'}`}>
+            {game.win ? 'Victory' : 'Defeat'}
+          </span>
+          <span>{game.queueLabel || 'Solo/Duo'}</span>
+          <span>{game.ago}</span>
+          <span>
+            {game.durationMin}:{String(game.durationSec || 0).padStart(2, '0')}
+          </span>
+        </div>
+
+        <div className="wd-match-champ">
+          <ChampImg name={game.champion} size={48} version={version} />
+          <div className="wd-match-spells">
+            {(game.spells || []).slice(0, 2).map((id, i) => (
+              <img key={`${id}-${i}`} src={summonerIconUrl(id, version)} alt="" />
+            ))}
+          </div>
+          <div className="wd-match-runes">
+            {game.runes?.keystone ? (
+              <img src={runeIconUrl(game.runes.keystone, runeIndex)} alt="" />
+            ) : null}
+            {game.runes?.sub ? (
+              <img src={runeIconUrl(game.runes.sub, runeIndex)} alt="" />
+            ) : null}
+          </div>
+        </div>
+
+        <div className="wd-match-kda">
+          <strong>{game.kills} / {game.deaths} / {game.assists}</strong>
+          <span>{game.kda} KDA</span>
+          <span>{game.kpPct != null ? `${game.kpPct}% KP` : '—'}</span>
+        </div>
+
+        <div className="wd-match-items">
+          {items.map((id, i) => (
+            id ? (
+              <img key={`${id}-${i}`} src={itemIconUrl(id, version)} alt="" />
+            ) : (
+              <span key={`empty-${i}`} className="wd-item-empty" />
+            )
+          ))}
+        </div>
+
+        <div className="wd-match-vs">
+          <span>vs</span>
+          <ChampImg name={game.opponent} size={32} version={version} />
+        </div>
+
+        <ScoreRing score={game.gdScore} win={game.win} />
+      </button>
+
+      {expanded ? (
+        <div className="wd-match-detail">
+          <div className="wd-match-teams">
+            <div>
+              <span className="wd-team-label is-ally">Your team</span>
+              <div className="wd-team-champs">
+                {(game.allyTeam || []).map((c) => (
+                  <ChampImg key={`a-${c}`} name={c} size={28} version={version} />
+                ))}
+              </div>
+            </div>
+            <div>
+              <span className="wd-team-label is-enemy">Enemy</span>
+              <div className="wd-team-champs">
+                {(game.enemyTeam || []).map((c) => (
+                  <ChampImg key={`e-${c}`} name={c} size={28} version={version} />
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="wd-match-phases">
+            <div><span>Early</span><strong>{game.earlyScore}</strong></div>
+            <div><span>Mid</span><strong>{game.midScore}</strong></div>
+            <div><span>Late</span><strong>{game.lateScore}</strong></div>
+            <div><span>CS/min</span><strong>{game.csPerMin ?? '—'}</strong></div>
+            <div><span>Role</span><strong>{game.role || '—'}</strong></div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -195,6 +280,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [version, setVersion] = useState('16.16.1');
+  const [runeIndex, setRuneIndex] = useState({});
 
   const qName = searchParams.get('name') || '';
   const qTag = searchParams.get('tag') || '';
@@ -206,13 +292,19 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(Boolean(activeId));
   const [loadError, setLoadError] = useState('');
   const [mode, setMode] = useState('Solo');
+  const [roleFilter, setRoleFilter] = useState('ALL');
+  const [tab, setTab] = useState('overview');
+  const [expandedId, setExpandedId] = useState(null);
   const [liveGame, setLiveGame] = useState(null);
-  const [liveAt, setLiveAt] = useState(Date.now());
-  const [now, setNow] = useState(Date.now());
-  const [matchIdx, setMatchIdx] = useState(0);
+  const [query, setQuery] = useState(activeId);
   const loadSeq = useRef(0);
 
-  useEffect(() => { ddragonVersion().then(setVersion); }, []);
+  useEffect(() => {
+    ddragonVersion().then(setVersion);
+    getRuneIndex().then(setRuneIndex);
+  }, []);
+
+  useEffect(() => { setQuery(activeId); }, [activeId]);
 
   const lookup = {
     platform: session?.platform || 'euw1',
@@ -229,8 +321,7 @@ export default function Dashboard() {
     const reqId = ++loadSeq.current;
     setLoading(true);
     setLoadError('');
-    setMatchIdx(0);
-    setLiveGame(null);
+    setExpandedId(null);
     const parsed = parseRiotIdInput(riotId);
     if (!parsed.gameName || !parsed.tagLine) {
       if (reqId !== loadSeq.current) return;
@@ -250,6 +341,7 @@ export default function Dashboard() {
       });
       if (reqId !== loadSeq.current) return;
       setProfile(data);
+      if (data.ddragonVersion) setVersion(data.ddragonVersion);
     } catch (err) {
       if (reqId !== loadSeq.current) return;
       setProfile(null);
@@ -275,462 +367,337 @@ export default function Dashboard() {
         platform: profile.platform || lookup.platform,
         region: lookup.region,
       }).then((g) => {
-        if (cancelled) return;
-        setLiveGame(g || null);
-        if (g) setLiveAt(Date.now());
+        if (!cancelled) setLiveGame(g || null);
       }).catch(() => {
         if (!cancelled) setLiveGame(null);
       });
     };
     tick();
-    const id = setInterval(tick, 15000);
+    const id = setInterval(tick, 20000);
     return () => { cancelled = true; clearInterval(id); };
   }, [profile?.riotId, profile?.platform, lookup.platform, lookup.region]);
 
-  useEffect(() => {
-    if (!liveGame) return undefined;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [liveGame]);
+  const onSearch = (e) => {
+    e.preventDefault();
+    const parsed = parseRiotIdInput(query);
+    if (!parsed.gameName || !parsed.tagLine) return;
+    setSearchParams({ name: parsed.gameName, tag: parsed.tagLine });
+  };
 
   const selectMode = (m) => {
     setMode(m);
     load(activeId, m);
   };
 
-  const winrate = profile && profile.wins != null
-    ? Math.round((profile.wins / Math.max(1, profile.wins + profile.losses)) * 100)
-    : null;
+  const games = useMemo(() => {
+    const list = profile?.recentGames || [];
+    if (roleFilter === 'ALL') return list;
+    return list.filter((g) => g.roleKey === roleFilter);
+  }, [profile?.recentGames, roleFilter]);
 
-  const s = profile?.stats || {};
-  const sp = profile?.sparklines || {};
-  const games = profile?.recentGames || [];
-  const lg = games[matchIdx] || profile?.lastGame || null;
-  const rc = profile ? rankColor(profile.rank) : '#a06bff';
-  const mmrRank = mmrToRank(profile?.estMmr);
-  const mmrColor = mmrRank?.tier ? (RANK_COLORS_SAFE(mmrRank.tier)) : '#9b86ff';
-  const collections = profile?.collections || { played: 0, total: 0 };
-  const lens = profile?.lens || { score: 0, series: [50], avgDeaths: 0 };
+  const dayGroups = useMemo(() => groupByDay(games), [games]);
+  const overview = profile?.overview || {};
+  const pool = profile?.championPool || [];
+  const topChamps = pool.slice(0, 3);
   const inLive = !!(liveGame && (liveGame.blue?.length || liveGame.red?.length));
-  const liveYou = inLive
-    ? [...(liveGame.blue || []), ...(liveGame.red || [])].find((p) => (
-      p.isSelf || String(p.riotId || '').toLowerCase() === String(profile?.riotId || '').toLowerCase()
-    ))
-    : null;
-  const splashChamp = liveYou?.champion || lg?.champion || null;
-  const liveAlly = liveYou?.teamId === 200 ? liveGame.red : liveGame?.blue;
-  const liveEnemy = liveYou?.teamId === 200 ? liveGame.blue : liveGame?.red;
-  const liveBlue = inLive ? (liveAlly || []).map((p) => p.champion) : null;
-  const liveRed = inLive ? (liveEnemy || []).map((p) => p.champion) : null;
-  const liveAllyTeam = liveYou?.teamId === 200 ? 200 : 100;
-  const padList = (list = []) => {
-    const rows = list.slice(0, 5);
-    while (rows.length < 5) rows.push({ champion: null });
-    return rows;
-  };
-  const allyBans = inLive
-    ? padTeamBans(liveGame.bans || [], liveAllyTeam)
-    : padList(lg?.allyBans);
-  const enemyBans = inLive
-    ? padTeamBans(liveGame.bans || [], liveAllyTeam === 200 ? 100 : 200)
-    : padList(lg?.enemyBans);
-  const showBans = inLive
-    ? (liveGame.bans || []).length > 0
-    : ((lg?.allyBans || []).length + (lg?.enemyBans || []).length) > 0;
-  const liveElapsed = inLive
-    ? (liveGame.gameLength || 0) + Math.floor((now - liveAt) / 1000)
-    : 0;
-
-  const lensPoints = (() => {
-    const series = lens.series?.length ? lens.series : [50];
-    const w = 200;
-    const h = 70;
-    const min = Math.min(...series);
-    const max = Math.max(...series);
-    const range = max - min || 1;
-    const pts = series.map((v, i) => {
-      const x = (i / Math.max(1, series.length - 1)) * w;
-      const y = h - 10 - ((v - min) / range) * (h - 18);
-      return [x, y];
-    });
-    const line = pts.map(([x, y]) => `${x},${y}`).join(' ');
-    const area = `M${pts[0][0]},${pts[0][1]} ${pts.slice(1).map(([x, y]) => `L${x},${y}`).join(' ')} L${w},${h} L0,${h} Z`;
-    return { line, area };
-  })();
-
-  const stats = [
-    { label: 'KDA', value: s.kda, delta: s.kdaDelta, deltaDir: s.kdaDeltaDir, sparkData: sp.kda },
-    { label: 'RIFT SCORE', value: s.gdScore, delta: s.gdDelta, deltaDir: s.gdDeltaDir, sparkData: sp.gdScore, hint: GD_SCORE_HINT },
-    { label: 'KP', value: s.kp, delta: s.kpDelta, deltaDir: s.kpDeltaDir, sparkData: sp.kp },
-    { label: 'CSM', value: s.csm, delta: s.csmDelta, deltaDir: s.csmDeltaDir, sparkData: sp.csm },
-    { label: 'VISION SCORE', value: s.visionScore, delta: s.visionDelta, deltaDir: s.visionDeltaDir, sparkData: sp.vision },
-    { label: 'GPM', value: s.gpm, delta: s.gpmDelta, deltaDir: s.gpmDeltaDir, sparkData: sp.gpm },
-    { label: 'GOLD DIFF @15', value: s.goldDiff15, delta: s.goldDiff15Delta, deltaDir: s.goldDiff15DeltaDir, sparkData: sp.goldDiff15 },
-    { label: 'K+A DIFF @15', value: s.kaDiff15, delta: s.kaDiff15Delta, deltaDir: s.kaDiff15DeltaDir, sparkData: sp.kaDiff15 },
-  ];
 
   return (
-    <div className="db-page">
-      <div className="db-page-head">
-        <div>
-          <h1 className="db-page-title">Dashboard</h1>
-          {viewingOther ? (
-            <div className="db-viewing-banner">
-              Viewing {activeId}
-              {ownId ? (
-                <button type="button" onClick={() => setSearchParams({})}>Back to my dashboard</button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-        <div className="db-toolbar">
-          <div className="db-mode-filters">
-            {MODE_KEYS.map((m) => (
-              <button
-                key={m}
-                type="button"
-                className={`db-mode-btn${m === mode ? ' active' : ''}`}
-                onClick={() => selectMode(m)}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-          <div className="db-toolbar-meta">
-            <span className="db-filter-label">Last 20 games</span>
-            <span className="db-filter-label">
-              {profile?.region || platformShort(profile?.platform || lookup.platform)}
-            </span>
-            <Link className="db-filter-label highlight" to="/profile">Profile</Link>
-          </div>
-        </div>
-      </div>
+    <div className="wd-page">
+      <header className="wd-head">
+        <form className="wd-search" onSubmit={onSearch}>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search Summoner Name#TAG"
+            aria-label="Search summoner"
+          />
+          <button type="submit" className="btn btn-violet btn-sm">Search</button>
+        </form>
+        {viewingOther && ownId ? (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSearchParams({})}>
+            Back to my dashboard
+          </button>
+        ) : null}
+        <Link className="btn btn-ghost btn-sm" to="/profile">Profile</Link>
+      </header>
 
       {!activeId ? (
-        <div className="db-loading">
-          <span>Link a Riot account to load your dashboard.</span>
-          <button type="button" className="db-retry" onClick={() => navigate('/profile')}>Link profile</button>
+        <div className="wd-empty">
+          <h1>Dashboard</h1>
+          <p className="muted">Link a Riot ID to open your DPM-style overview and match history.</p>
+          <button type="button" className="btn btn-violet" onClick={() => navigate('/profile')}>Link profile</button>
         </div>
       ) : loadError ? (
-        <div className="db-loading">
-          <span>{loadError}</span>
-          <button type="button" className="db-retry" onClick={() => load(activeId)}>Retry</button>
+        <div className="wd-empty">
+          <p>{loadError}</p>
+          <button type="button" className="btn btn-violet" onClick={() => load(activeId)}>Retry</button>
         </div>
       ) : loading || !profile ? (
-        <div className="db-loading">
-          <div className="db-loading-spinner" />
-          <span>Loading summoner data…</span>
+        <div className="wd-empty">
+          <div className="wd-spinner" />
+          <p className="muted">Loading summoner data…</p>
         </div>
       ) : (
-        <div className="db-content">
-          <div className="db-body">
-            <div className="db-main-col">
-              <div className="db-hero">
-                <div
-                  className="db-splash-bg"
-                  style={splashChamp ? { backgroundImage: `url(${champSplashUrl(splashChamp)})` } : undefined}
+        <>
+          <section className="wd-profile">
+            <div className="wd-profile-main">
+              <div className="wd-avatar-wrap">
+                <img
+                  src={profileIconUrl(profile.profileIconId, version)}
+                  alt=""
+                  className="wd-avatar"
+                  onError={(e) => { e.currentTarget.src = profileIconUrl(29, version); }}
                 />
-                <div className="db-splash-overlay" />
-                <div className="db-hero-inner">
-                  <div className="db-hero-top">
-                    <div className="db-profile-row">
-                      <div className="db-avatar-wrap" style={{ '--rc': rc }}>
-                        <img
-                          src={profileIconUrl(profile.profileIconId, version)}
-                          alt=""
-                          className="db-avatar"
-                          onError={(e) => {
-                            const el = e.currentTarget;
-                            if (el.dataset.fb) {
-                              el.style.visibility = 'hidden';
-                              return;
-                            }
-                            el.dataset.fb = '1';
-                            el.src = profileIconUrl(29, version);
-                          }}
-                        />
-                        {profile.summonerLevel != null ? (
-                          <span className="db-avatar-level">{profile.summonerLevel}</span>
-                        ) : null}
-                      </div>
-                      <div className="db-profile-info">
-                        <h2 className="db-summoner-name">{profile.riotId?.split('#')[0]}</h2>
-                        <div className="db-profile-meta">
-                          <span className="db-summoner-tag">#{profile.riotId?.split('#')[1]}</span>
-                          <span className="db-summoner-tag">{profile.region || platformShort(profile.platform)}</span>
-                        </div>
-                      </div>
-                    </div>
+                {profile.summonerLevel != null ? (
+                  <span className="wd-level">{profile.summonerLevel}</span>
+                ) : null}
+              </div>
+              <div>
+                <h1>
+                  {profile.gameName}
+                  <span>#{profile.tagLine}</span>
+                </h1>
+                <div className="wd-profile-meta">
+                  <span>{profile.region || platformShort(profile.platform)}</span>
+                  {inLive ? <span className="wd-live-pill">Live now</span> : null}
+                  <span className="muted">Last {overview.games || 0} games · {mode}</span>
+                </div>
+              </div>
+            </div>
+            <div className="wd-tabs">
+              {[
+                { id: 'overview', label: 'Overview' },
+                { id: 'champions', label: 'Champions' },
+                { id: 'live', label: 'Live' },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={tab === t.id ? 'is-on' : ''}
+                  onClick={() => setTab(t.id)}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </section>
 
-                    <div className="db-rank-card" style={{ '--rc': rc }}>
-                      <span className="db-rank-card-eyebrow">{MODE_LABEL[mode]}</span>
-                      <div className="db-rank-card-main">
-                        {rankImg(profile.rank) ? (
-                          <img
-                            src={rankImg(profile.rank)}
-                            alt={profile.rank}
-                            className={rankEmblemClass(profile.rank, 'db-rank-card-emblem')}
-                          />
-                        ) : null}
-                        <div className="db-rank-card-info">
-                          <span className="db-rank-card-name" style={{ color: rc }}>{profile.rank || 'Unranked'}</span>
-                          {profile.ladderRank ? (
-                            <span className="db-rank-card-num" style={{ color: rc }}>#{profile.ladderRank}</span>
-                          ) : null}
-                          <span className="db-rank-card-lp" style={{ color: rc }}>
-                            {profile.lp != null ? `${profile.lp} LP` : '—'}
-                          </span>
+          {tab === 'live' ? (
+            <section className="wd-live-panel card">
+              {inLive ? (
+                <>
+                  <h2>In game · {liveGame.queueName || 'Custom'}</h2>
+                  <div className="wd-live-teams">
+                    <div>
+                      {(liveGame.blue || []).map((p) => (
+                        <div key={p.puuid || p.riotId} className={p.isSelf ? 'is-self' : ''}>
+                          <ChampImg name={p.champion} size={32} version={version} />
+                          <span>{p.riotId || p.champion}</span>
                         </div>
-                      </div>
-                      {mmrRank ? (
-                        <div className="db-rank-split">
-                          <div className="db-rank-split-col">
-                            <span className="db-rank-split-label">PEAK</span>
-                            <span className="db-rank-split-val" style={{ color: rc }}>—</span>
-                          </div>
-                          <div className="db-rank-split-col is-mmr">
-                            <span className="db-rank-split-label">MMR</span>
-                            {rankImg(mmrRank.tier) ? (
-                              <img src={rankImg(mmrRank.tier)} alt="" className="db-rank-split-emblem" />
-                            ) : null}
-                            <span className="db-rank-split-val" style={{ color: mmrColor }}>
-                              {mmrRank.short || '—'}
-                            </span>
-                            <span
-                              className="db-rank-split-q"
-                              title={`Estimated MMR${formatMmr(profile.estMmr) ? ` (${formatMmr(profile.estMmr)})` : ''}`}
-                            >
-                              ?
-                            </span>
-                          </div>
+                      ))}
+                    </div>
+                    <strong>VS</strong>
+                    <div>
+                      {(liveGame.red || []).map((p) => (
+                        <div key={p.puuid || p.riotId} className={p.isSelf ? 'is-self' : ''}>
+                          <ChampImg name={p.champion} size={32} version={version} />
+                          <span>{p.riotId || p.champion}</span>
                         </div>
-                      ) : null}
-                      <div className="db-rank-card-record">
-                        {profile.wins != null
-                          ? `${profile.wins}W – ${profile.losses}L${winrate != null ? ` · ${winrate}%` : ''}`
-                          : 'Rank unavailable'}
-                      </div>
+                      ))}
                     </div>
                   </div>
+                </>
+              ) : (
+                <p className="muted" style={{ margin: 0 }}>Not in a live game right now.</p>
+              )}
+            </section>
+          ) : null}
 
-                  <div className="db-stat-grid">
-                    {stats.map((stat) => (
-                      <StatCard key={stat.label} {...stat} />
+          {tab === 'champions' ? (
+            <section className="wd-champ-table card">
+              <header>
+                <h2>Champion performance</h2>
+                <span className="muted">From last {overview.games || 0} {mode} games</span>
+              </header>
+              <div className="wd-champ-table-head">
+                <span>Champion</span>
+                <span>KDA</span>
+                <span>CS/M</span>
+                <span>Games</span>
+                <span>WR</span>
+              </div>
+              {pool.map((row) => (
+                <div key={row.champion} className="wd-champ-table-row">
+                  <div className="wd-champ-name">
+                    <ChampImg name={row.champion} size={28} version={version} />
+                    <span>{row.champion}</span>
+                  </div>
+                  <span>{row.kda}</span>
+                  <span>{row.cs}</span>
+                  <span>{row.games}</span>
+                  <span className={row.wr >= 50 ? 'is-up' : 'is-down'}>{row.wr}%</span>
+                </div>
+              ))}
+              {!pool.length ? <p className="muted">No champion data for this queue.</p> : null}
+            </section>
+          ) : null}
+
+          {tab === 'overview' ? (
+            <div className="wd-layout">
+              <aside className="wd-side">
+                <RankCard
+                  title="Ranked Solo"
+                  ranked={profile.solo || {
+                    rank: profile.rank,
+                    lp: profile.lp,
+                    wins: profile.wins,
+                    losses: profile.losses,
+                  }}
+                  ladderRank={profile.ladderRank}
+                  sparkData={profile.sparklines?.gdScore || []}
+                />
+                <RankCard title="Ranked Flex" ranked={profile.flex} />
+
+                <article className="wd-side-card">
+                  <header>
+                    <h3>Champion performance</h3>
+                    <div className="wd-mode-mini">
+                      {MODE_KEYS.map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          className={mode === m ? 'is-on' : ''}
+                          onClick={() => selectMode(m)}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+                  </header>
+                  <div className="wd-champ-mini-head">
+                    <span>Champ</span>
+                    <span>KDA</span>
+                    <span>CS</span>
+                    <span>WR</span>
+                  </div>
+                  {pool.slice(0, 6).map((row) => (
+                    <div key={row.champion} className="wd-champ-mini-row">
+                      <div>
+                        <ChampImg name={row.champion} size={24} version={version} />
+                        <span>{row.games}</span>
+                      </div>
+                      <span>{row.kda}</span>
+                      <span>{row.cs}</span>
+                      <span className={row.wr >= 50 ? 'is-up' : 'is-down'}>{row.wr}%</span>
+                    </div>
+                  ))}
+                  {!pool.length ? <p className="muted" style={{ padding: '8px 0 0' }}>No games in this queue.</p> : null}
+                  <button type="button" className="wd-all-btn" onClick={() => setTab('champions')}>All</button>
+                </article>
+              </aside>
+
+              <section className="wd-main">
+                <article className="wd-summary">
+                  <WinDonut
+                    winrate={overview.winrate || 0}
+                    wins={overview.wins || 0}
+                    losses={overview.losses || 0}
+                  />
+                  <div className="wd-summary-champs">
+                    {topChamps.map((row) => (
+                      <div key={row.champion}>
+                        <ChampImg name={row.champion} size={40} version={version} />
+                        <strong className={row.wr >= 50 ? 'is-up' : 'is-down'}>{row.wr}%</strong>
+                        <span>{row.kda} KDA</span>
+                      </div>
+                    ))}
+                    {!topChamps.length ? <span className="muted">Play some games to fill this.</span> : null}
+                  </div>
+                  <div className="wd-summary-stats">
+                    <div>
+                      <span>KDA</span>
+                      <strong>{overview.avgKda || '—'}</strong>
+                      <small>
+                        {overview.avgKills ?? '—'} / {overview.avgDeaths ?? '—'} / {overview.avgAssists ?? '—'}
+                      </small>
+                    </div>
+                    <div>
+                      <span>Rift Score</span>
+                      <strong>{overview.avgGdScore || '—'}</strong>
+                      <small>avg last {overview.games || 0}</small>
+                    </div>
+                    <div>
+                      <span>KP</span>
+                      <strong>{overview.avgKp != null ? `${overview.avgKp}%` : '—'}</strong>
+                      <small>kill participation</small>
+                    </div>
+                  </div>
+                </article>
+
+                <div className="wd-filters">
+                  <div className="wd-role-filters">
+                    {ROLE_FILTERS.map((r) => (
+                      <button
+                        key={r.key}
+                        type="button"
+                        className={roleFilter === r.key ? 'is-on' : ''}
+                        onClick={() => setRoleFilter(r.key)}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="wd-mode-filters">
+                    {MODE_KEYS.map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        className={mode === m ? 'is-on' : ''}
+                        onClick={() => selectMode(m)}
+                      >
+                        {m}
+                      </button>
                     ))}
                   </div>
                 </div>
-              </div>
 
-              <div className="db-cards">
-                <article className="db-dpm-card db-card-match">
-                  <button type="button" className="db-card-side-arrow is-left" aria-label="Previous" onClick={() => setMatchIdx((i) => (i - 1 + games.length) % Math.max(1, games.length))}>‹</button>
-                  <button type="button" className="db-card-side-arrow is-right" aria-label="Next" onClick={() => setMatchIdx((i) => (i + 1) % Math.max(1, games.length))}>›</button>
-
-                  <div className="db-card-match-top">
-                    <span className="db-region-badge">{lg?.region || platformShort(profile.platform)}</span>
-                    <span className={`db-match-timer${inLive ? ' is-live' : ''}`}>
-                      <span className="db-match-timer-dot" />
-                      {inLive
-                        ? fmtElapsed(liveElapsed)
-                        : lg
-                          ? `${lg.durationMin}:${String(lg.durationSec || 0).padStart(2, '0')}`
-                          : '--:--'}
-                    </span>
-                    {(inLive ? liveGame.queueName : lg?.queueType) ? (
-                      <span className="db-queue-badge">{inLive ? liveGame.queueName : lg.queueType}</span>
-                    ) : null}
-                  </div>
-
-                  <div className="db-card-match-teams">
-                    {showBans ? (
-                      <div className="db-ban-row">
-                        {allyBans.map((b, i) => (
-                          <span key={`ab-${b.champion || i}`} className={`db-ban${b.champion ? '' : ' is-empty'}`}>
-                            {b.champion ? <ChampionIcon name={b.champion} size={18} /> : null}
-                          </span>
+                <div className="wd-history">
+                  {dayGroups.map((group) => {
+                    const wins = group.games.filter((g) => g.win).length;
+                    const losses = group.games.length - wins;
+                    const avgScore = group.games.length
+                      ? (group.games.reduce((s, g) => s + (g.gdScore || 0), 0) / group.games.length).toFixed(1)
+                      : '—';
+                    return (
+                      <div key={group.key} className="wd-day">
+                        <div className="wd-day-head">
+                          <strong>{group.key}</strong>
+                          <span>Rift Score: {avgScore}</span>
+                          <span>{wins} wins</span>
+                          <span>{losses} losses</span>
+                        </div>
+                        {group.games.map((g) => (
+                          <MatchRow
+                            key={g.matchId}
+                            game={g}
+                            version={version}
+                            runeIndex={runeIndex}
+                            expanded={expandedId === g.matchId}
+                            onToggle={() => setExpandedId((id) => (id === g.matchId ? null : g.matchId))}
+                          />
                         ))}
                       </div>
-                    ) : null}
-                    <div className="db-card-match-row">
-                      {Array.from({ length: 5 }).map((_, i) => {
-                        const c = (liveBlue || lg?.allyTeam)?.[i];
-                        return c
-                          ? <ChampionIcon key={`a-${c}-${i}`} name={c} size={46} team="blue" />
-                          : <span key={`a-empty-${i}`} className="db-champ-empty" />;
-                      })}
-                    </div>
-                    <div className="db-vs-chip">VS</div>
-                    <div className="db-card-match-row">
-                      {Array.from({ length: 5 }).map((_, i) => {
-                        const c = (liveRed || lg?.enemyTeam)?.[i];
-                        return c
-                          ? <ChampionIcon key={`e-${c}-${i}`} name={c} size={46} team="red" />
-                          : <span key={`e-empty-${i}`} className="db-champ-empty" />;
-                      })}
-                    </div>
-                    {showBans ? (
-                      <div className="db-ban-row">
-                        {enemyBans.map((b, i) => (
-                          <span key={`eb-${b.champion || i}`} className={`db-ban${b.champion ? '' : ' is-empty'}`}>
-                            {b.champion ? <ChampionIcon name={b.champion} size={18} team="red" /> : null}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="db-card-match-dots">
-                    {(games.length ? games : [0]).map((g, i) => (
-                      <button
-                        type="button"
-                        key={g.matchId || i}
-                        className={i === matchIdx ? 'is-on' : ''}
-                        aria-label={`Match ${i + 1}`}
-                        onClick={() => setMatchIdx(i)}
-                      />
-                    ))}
-                  </div>
-
-                  <span className={`db-pill-btn db-pill-btn--live${inLive ? ' is-live' : ''}`}>
-                    {inLive ? 'In game' : 'Live status'}
-                  </span>
-                </article>
-
-                <article className="db-dpm-card db-card-soon">
-                  {lg && splashChamp ? (
-                    <img
-                      src={champLoadingUrl(splashChamp)}
-                      alt=""
-                      className="db-card-soon-art"
-                      onError={(e) => { e.target.style.display = 'none'; }}
-                    />
+                    );
+                  })}
+                  {!games.length ? (
+                    <div className="wd-empty-inline muted">No games for this queue / role filter.</div>
                   ) : null}
-                  <div className="db-card-soon-overlay" />
-                  <div className="db-card-soon-body">
-                    <span className="db-card-soon-kicker">Replays · Soon</span>
-                    <h3>Paused for now</h3>
-                    <p>Full replay capture stays in the desktop app for now.</p>
-                  </div>
-                </article>
-
-                {lg ? (
-                  <article className="db-dpm-card db-card-perf">
-                    <div className="db-card-perf-head">
-                      <ChampionIcon name={lg.champion} size={42} rounded />
-                      <div className="db-card-perf-kda-wrap">
-                        <div className="db-card-perf-kda">{lg.kills} / {lg.deaths} / {lg.assists}</div>
-                        <div className="db-card-perf-kda-sub">{lg.kda} KDA</div>
-                      </div>
-                    </div>
-                    <div className="db-card-perf-rings">
-                      <ScoreRing label="EARLY" value={lg.earlyScore} color="#7c5cff" size={58} />
-                      <ScoreRing label="MID" value={lg.midScore} color="#5ba2ff" size={58} />
-                      <ScoreRing label="LATE" value={lg.lateScore} color="#3ecf8e" size={58} />
-                    </div>
-                    <div className="db-card-perf-stats">
-                      <div>
-                        <span>Deaths</span>
-                        <strong className="is-red">{lg.deaths4}</strong>
-                      </div>
-                      <div>
-                        <span>Kills + Assists</span>
-                        <strong className="is-gold">{lg.killsAssists}</strong>
-                      </div>
-                      <div>
-                        <span>CSM</span>
-                        <strong className="is-green">{lg.csm}</strong>
-                      </div>
-                    </div>
-                    <a className="db-pill-btn db-pill-btn--solid" href="../index.html">
-                      Review in app
-                    </a>
-                  </article>
-                ) : null}
-
-                <article className="db-dpm-card db-card-overlays">
-                  <div className="db-overlays-dim" />
-                  <div className="db-overlays-foot">
-                    <span className="db-overlays-logo" aria-hidden="true" />
-                    <span className="db-card-title-lg">Overlays</span>
-                    <span className="db-overlays-soon">Desktop app</span>
-                  </div>
-                </article>
-
-                <article className="db-dpm-card db-card-collections">
-                  <img className="db-collections-art" src={champSplashUrl('Rakan')} alt="" />
-                  <div className="db-collections-overlay" />
-                  <div className="db-collections-count">
-                    {collections.played} / {collections.total} champions played
-                  </div>
-                  <div className="db-collections-foot">
-                    <span className="db-hex-icon" aria-hidden="true" />
-                    <span className="db-card-title-lg">Collections</span>
-                  </div>
-                </article>
-
-                <article className="db-dpm-card db-card-lens">
-                  <div className="db-lens-head">
-                    <span className="db-lens-mark">◎</span>
-                    <span>Rift Lens</span>
-                  </div>
-                  <svg viewBox="0 0 200 70" className="db-lens-graph" preserveAspectRatio="none">
-                    <defs>
-                      <linearGradient id="webLensFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#ffb454" stopOpacity="0.35" />
-                        <stop offset="100%" stopColor="#ffb454" stopOpacity="0" />
-                      </linearGradient>
-                    </defs>
-                    <path d={lensPoints.area} fill="url(#webLensFill)" />
-                    <polyline
-                      points={lensPoints.line}
-                      fill="none"
-                      stroke="#ffb454"
-                      strokeWidth="2.4"
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                  <div className="db-lens-foot">
-                    <div>
-                      <div className="db-lens-label">Survivability</div>
-                      <div className="db-lens-sub">Avg {lens.avgDeaths} deaths / game</div>
-                    </div>
-                    <div className="db-lens-score">{lens.score}/100</div>
-                  </div>
-                </article>
-              </div>
+                </div>
+              </section>
             </div>
-
-            <aside className="db-matches">
-              <div className="db-matches-header">
-                {MODE_LABEL[mode]} · Recent games
-              </div>
-              <div className="db-recent-list">
-                {(profile.recentGames || []).map((g, i) => (
-                  <RecentGameRow
-                    key={g.matchId}
-                    game={g}
-                    active={i === matchIdx}
-                    onSelect={() => setMatchIdx(i)}
-                  />
-                ))}
-                {!(profile.recentGames || []).length ? (
-                  <div className="db-recent-empty">No games in this queue yet.</div>
-                ) : null}
-              </div>
-            </aside>
-          </div>
-        </div>
+          ) : null}
+        </>
       )}
     </div>
   );
-}
-
-function RANK_COLORS_SAFE(tier) {
-  const map = {
-    IRON: '#8a8a8a', BRONZE: '#cd7f32', SILVER: '#9fb3c8', GOLD: '#e0b256',
-    PLATINUM: '#4fd7c5', EMERALD: '#3ecf8e', DIAMOND: '#5ba2ff', MASTER: '#a06bff',
-    GRANDMASTER: '#ff5c68', CHALLENGER: '#ffd76b',
-  };
-  return map[String(tier || '').toUpperCase()] || '#9b86ff';
 }
