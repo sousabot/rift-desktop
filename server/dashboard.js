@@ -310,7 +310,9 @@ function goldDiffAtTimestamp(timeline, selfId, oppId, ts) {
 }
 
 function computeAt15(timeline, match, self) {
-  const empty = { goldDiff15: null, kaDiff15: null };
+  const empty = {
+    goldDiff15: null, kaDiff15: null, csDiff15: null, xpDiff15: null, cs15: null,
+  };
   if (!timeline?.info?.frames?.length) return empty;
   const lanePos = (participant) => {
     const pos = participant?.teamPosition || participant?.individualPosition || '';
@@ -328,6 +330,16 @@ function computeAt15(timeline, match, self) {
   const selfFrame = frameAt15.participantFrames[String(selfId)];
   const oppFrame = oppId != null ? frameAt15.participantFrames[String(oppId)] : null;
   const goldDiff15 = selfFrame && oppFrame ? selfFrame.totalGold - oppFrame.totalGold : null;
+  const xpDiff15 = selfFrame && oppFrame
+    ? (selfFrame.xp || 0) - (oppFrame.xp || 0)
+    : null;
+  const cs15 = selfFrame
+    ? (selfFrame.minionsKilled || 0) + (selfFrame.jungleMinionsKilled || 0)
+    : null;
+  const csDiff15 = selfFrame && oppFrame
+    ? ((selfFrame.minionsKilled || 0) + (selfFrame.jungleMinionsKilled || 0))
+      - ((oppFrame.minionsKilled || 0) + (oppFrame.jungleMinionsKilled || 0))
+    : null;
 
   let selfKA = 0;
   let oppKA = 0;
@@ -342,6 +354,190 @@ function computeAt15(timeline, match, self) {
   return {
     goldDiff15,
     kaDiff15: oppId != null ? selfKA - oppKA : null,
+    csDiff15,
+    xpDiff15,
+    cs15,
+  };
+}
+
+const SKIP_ITEMS = new Set([
+  0, 2003, 2010, 2031, 2033, 2052, 2055, 2138, 2139, 2140,
+  3340, 3363, 3364, 3513,
+]);
+
+function itemPurchases(timeline, participantId) {
+  if (!timeline?.info?.frames?.length) return [];
+  const events = [];
+  for (const frame of timeline.info.frames) {
+    for (const ev of frame.events || []) {
+      if (ev.participantId !== participantId) continue;
+      if (ev.type === 'ITEM_PURCHASED' || ev.type === 'ITEM_SOLD' || ev.type === 'ITEM_UNDO') {
+        events.push(ev);
+      }
+    }
+  }
+  events.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  const buys = [];
+  for (const ev of events) {
+    if (ev.type === 'ITEM_PURCHASED') {
+      const id = Number(ev.itemId) || 0;
+      if (!id || SKIP_ITEMS.has(id)) continue;
+      buys.push({ id, atMs: Number(ev.timestamp) || 0, sold: false });
+    } else if (ev.type === 'ITEM_SOLD') {
+      const id = Number(ev.itemId) || 0;
+      for (let i = buys.length - 1; i >= 0; i -= 1) {
+        if (buys[i].id === id && !buys[i].sold) {
+          buys[i].sold = true;
+          break;
+        }
+      }
+    } else if (ev.type === 'ITEM_UNDO') {
+      const before = Number(ev.beforeId) || 0;
+      if (!before) continue;
+      for (let i = buys.length - 1; i >= 0; i -= 1) {
+        if (buys[i].id === before) { buys.splice(i, 1); break; }
+      }
+    }
+  }
+  return buys;
+}
+
+function skillOrder(timeline, participantId) {
+  if (!timeline?.info?.frames?.length) return [];
+  const order = [];
+  for (const frame of timeline.info.frames) {
+    for (const ev of frame.events || []) {
+      if (ev.type !== 'SKILL_LEVEL_UP' || ev.participantId !== participantId) continue;
+      const slot = Number(ev.skillSlot);
+      if (slot >= 1 && slot <= 4) order.push(slot);
+    }
+  }
+  return order;
+}
+
+function teamObjectives(match, teamId) {
+  const obj = (match?.info?.teams || []).find((team) => team.teamId === teamId)?.objectives || null;
+  if (!obj) return { tower: 0, dragon: 0, baron: 0, herald: 0, grub: 0 };
+  return {
+    tower: Number(obj.tower?.kills) || 0,
+    dragon: Number(obj.dragon?.kills) || 0,
+    baron: Number(obj.baron?.kills) || 0,
+    herald: Number(obj.riftHerald?.kills) || 0,
+    grub: Number(obj.horde?.kills || obj.voidGrub?.kills) || 0,
+  };
+}
+
+function participantRunes(p) {
+  const primary = p.perks?.styles?.find((s) => s.description === 'primaryStyle') || p.perks?.styles?.[0];
+  const sub = p.perks?.styles?.find((s) => s.description === 'subStyle') || p.perks?.styles?.[1];
+  const primaryPerks = (primary?.selections || []).map((s) => s.perk);
+  const subPerks = (sub?.selections || []).map((s) => s.perk);
+  const shards = (p.perks?.statPerks && [
+    p.perks.statPerks.offense,
+    p.perks.statPerks.flex,
+    p.perks.statPerks.defense,
+  ]) || [];
+  return {
+    keystone: primaryPerks[0] || null,
+    primary: primary?.style || null,
+    primaryPerks: primaryPerks.slice(0, 4),
+    sub: sub?.style || null,
+    subPerks: subPerks.slice(0, 2),
+    shards: shards.filter(Boolean),
+  };
+}
+
+function buildScoreboard(match, timeline, selfPuuid) {
+  const mins = Math.max(1, (match.info.gameDuration || 1) / 60);
+  const rows = (match.info.participants || []).map((pp) => {
+    const teamKills = match.info.participants
+      .filter((x) => x.teamId === pp.teamId)
+      .reduce((sum, x) => sum + (x.kills || 0), 0);
+    const teamDamage = match.info.participants
+      .filter((x) => x.teamId === pp.teamId)
+      .reduce((sum, x) => sum + (x.totalDamageDealtToChampions || 0), 0);
+    const damage = pp.totalDamageDealtToChampions || 0;
+    const kp = teamKills > 0 ? (pp.kills + pp.assists) / teamKills : 0;
+    const gdScore = gdScoreFromParticipant(pp, match);
+    const gameName = pp.riotIdGameName || pp.gameName || '';
+    const tagLine = pp.riotIdTagline || pp.tagLine || '';
+    const runes = participantRunes(pp);
+    const roleKey = String(pp.teamPosition || pp.individualPosition || '').toUpperCase();
+    return {
+      puuid: pp.puuid,
+      isSelf: pp.puuid === selfPuuid,
+      win: !!pp.win,
+      teamId: pp.teamId,
+      champion: pp.championName,
+      champLevel: Number(pp.champLevel) || null,
+      gameName,
+      tagLine,
+      riotId: gameName && tagLine ? `${gameName}#${tagLine}` : '',
+      role: roleLabel(roleKey),
+      roleKey: roleKey || null,
+      kills: pp.kills,
+      deaths: pp.deaths,
+      assists: pp.assists,
+      kda: ((pp.kills + pp.assists) / Math.max(1, pp.deaths)).toFixed(1),
+      kpPct: Math.round(kp * 100),
+      cs: (pp.totalMinionsKilled || 0) + (pp.neutralMinionsKilled || 0),
+      csPerMin: Number((((pp.totalMinionsKilled || 0) + (pp.neutralMinionsKilled || 0)) / mins).toFixed(1)),
+      visionScore: Number(pp.visionScore) || 0,
+      visionPerMin: Number(((pp.visionScore || 0) / mins).toFixed(1)),
+      damage,
+      damageShare: teamDamage ? damage / teamDamage : 0,
+      dpm: Math.round(damage / mins),
+      gpm: Math.round((pp.goldEarned || 0) / mins),
+      gdScore,
+      items: [pp.item0, pp.item1, pp.item2, pp.item3, pp.item4, pp.item5, pp.item6],
+      spells: [pp.summoner1Id, pp.summoner2Id],
+      runes,
+      wardsPlaced: Number(pp.wardsPlaced) || 0,
+      wardsKilled: Number(pp.wardsKilled) || 0,
+      controlWards: Number(pp.visionWardsBoughtInGame) || 0,
+      spell1Casts: Number(pp.spell1Casts) || 0,
+      spell2Casts: Number(pp.spell2Casts) || 0,
+      spell3Casts: Number(pp.spell3Casts) || 0,
+      spell4Casts: Number(pp.spell4Casts) || 0,
+      summoner1Casts: Number(pp.summoner1Casts) || 0,
+      summoner2Casts: Number(pp.summoner2Casts) || 0,
+      pings: {
+        assist: Number(pp.assistMePings) || 0,
+        onMyWay: Number(pp.onMyWayPings) || 0,
+        enemyVision: Number(pp.enemyVisionPings) || 0,
+        danger: Number(pp.dangerPings) || 0,
+        missing: Number(pp.enemyMissingPings) || 0,
+        push: Number(pp.pushPings) || 0,
+      },
+    };
+  });
+
+  const sorted = [...rows].sort((a, b) => b.gdScore - a.gdScore);
+  sorted.forEach((row, i) => { row.place = i + 1; });
+  const bestWin = sorted.find((r) => r.win);
+  const bestLose = sorted.find((r) => !r.win);
+  rows.forEach((row) => {
+    if (bestWin && row.puuid === bestWin.puuid) row.badge = 'MVP';
+    else if (bestLose && row.puuid === bestLose.puuid) row.badge = 'ACE';
+    else {
+      const n = row.place;
+      const suf = n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th';
+      row.badge = `${n}${suf}`;
+    }
+  });
+
+  const self = rows.find((r) => r.isSelf);
+  if (self && timeline) {
+    self.buildPurchases = itemPurchases(timeline, match.info.participants.find((pp) => pp.puuid === selfPuuid)?.participantId);
+    self.skillOrder = skillOrder(timeline, match.info.participants.find((pp) => pp.puuid === selfPuuid)?.participantId);
+  }
+
+  return {
+    players: rows,
+    blue: rows.filter((r) => r.teamId === 100),
+    red: rows.filter((r) => r.teamId === 200),
+    blueObj: teamObjectives(match, 100),
+    redObj: teamObjectives(match, 200),
   };
 }
 
@@ -485,7 +681,7 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     const teamKills = m.info.participants
       .filter((pp) => pp.teamId === p.teamId)
       .reduce((sum, pp) => sum + pp.kills, 0);
-    const { goldDiff15, kaDiff15 } = computeAt15(timelines[idx], m, p);
+    const { goldDiff15, kaDiff15, csDiff15, xpDiff15, cs15 } = computeAt15(timelines[idx], m, p);
     const phases = computePhaseScores(timelines[idx], m, p);
     const allyTeam = [
       p.championName,
@@ -503,11 +699,12 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
           && (pp.teamPosition === lanePos || pp.individualPosition === lanePos)
       )
       : null;
-    const primary = p.perks?.styles?.find((s) => s.description === 'primaryStyle') || p.perks?.styles?.[0];
-    const sub = p.perks?.styles?.find((s) => s.description === 'subStyle') || p.perks?.styles?.[1];
-    const primaryPerks = (primary?.selections || []).map((s) => s.perk);
+    const runes = participantRunes(p);
     const gdScore = gdScoreFromParticipant(p, m);
     const kp = teamKills > 0 ? (p.kills + p.assists) / teamKills : 0;
+    const damage = p.totalDamageDealtToChampions || 0;
+    const scoreboard = buildScoreboard(m, timelines[idx], puuid);
+    const selfBoard = scoreboard.players.find((row) => row.isSelf);
     return {
       matchId: m.metadata.matchId,
       win: p.win,
@@ -525,16 +722,24 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
       ago: timeAgo(m.info.gameEndTimestamp),
       endedAt: m.info.gameEndTimestamp || null,
       gdScore,
+      place: selfBoard?.place || null,
+      badge: selfBoard?.badge || null,
       queueId: m.info.queueId,
       queueLabel: QUEUE_NAMES[m.info.queueId] || 'Other',
       queueType: QUEUE_NAMES[m.info.queueId] || 'Other',
       region: PLATFORM_LABEL[shard] || String(shard).toUpperCase(),
-      gpm: p.goldEarned / mins,
-      visionPerMin: p.visionScore / mins,
+      gpm: Math.round(p.goldEarned / mins),
+      visionPerMin: Number((p.visionScore / mins).toFixed(1)),
+      visionScore: Number(p.visionScore) || 0,
       kp,
       kpPct: Math.round(kp * 100),
+      damage,
+      dpm: Math.round(damage / mins),
       goldDiff15,
       kaDiff15,
+      csDiff15,
+      xpDiff15,
+      cs15,
       earlyScore: phases.early,
       midScore: phases.mid,
       lateScore: phases.late,
@@ -549,11 +754,22 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
       enemyBans: teamBans(m, p.teamId === 200 ? 100 : 200),
       items: [p.item0, p.item1, p.item2, p.item3, p.item4, p.item5, p.item6],
       spells: [p.summoner1Id, p.summoner2Id],
-      runes: {
-        keystone: primaryPerks[0] || null,
-        primary: primary?.style || null,
-        sub: sub?.style || null,
+      runes,
+      wardsPlaced: Number(p.wardsPlaced) || 0,
+      wardsKilled: Number(p.wardsKilled) || 0,
+      controlWards: Number(p.visionWardsBoughtInGame) || 0,
+      spellCasts: {
+        q: Number(p.spell1Casts) || 0,
+        w: Number(p.spell2Casts) || 0,
+        e: Number(p.spell3Casts) || 0,
+        r: Number(p.spell4Casts) || 0,
+        d: Number(p.summoner1Casts) || 0,
+        f: Number(p.summoner2Casts) || 0,
       },
+      pings: selfBoard?.pings || {},
+      buildPurchases: selfBoard?.buildPurchases || [],
+      skillOrder: selfBoard?.skillOrder || [],
+      scoreboard,
     };
   }).filter(Boolean);
 

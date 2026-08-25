@@ -15,6 +15,7 @@ import {
   runeIconUrl,
   summonerIconUrl,
 } from '../lib';
+import MatchExpand from './MatchExpand';
 import './Dashboard.css';
 
 const MODE_KEYS = ['All', 'Solo', 'Flex', 'Aram', 'Normal'];
@@ -269,37 +270,14 @@ function MatchRow({ game, version, runeIndex, expanded, onToggle }) {
           <ChampImg name={game.opponent} size={32} version={version} />
         </div>
 
-        <ScoreRing score={game.gdScore} win={game.win} />
+        <div className="wd-match-score">
+          <ScoreRing score={game.gdScore} win={game.win} />
+          {game.badge ? <span className="wd-match-place">{game.badge}</span> : null}
+        </div>
       </button>
 
       {expanded ? (
-        <div className="wd-match-detail">
-          <div className="wd-match-teams">
-            <div>
-              <span className="wd-team-label is-ally">Your team</span>
-              <div className="wd-team-champs">
-                {(game.allyTeam || []).map((c) => (
-                  <ChampImg key={`a-${c}`} name={c} size={28} version={version} />
-                ))}
-              </div>
-            </div>
-            <div>
-              <span className="wd-team-label is-enemy">Enemy</span>
-              <div className="wd-team-champs">
-                {(game.enemyTeam || []).map((c) => (
-                  <ChampImg key={`e-${c}`} name={c} size={28} version={version} />
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="wd-match-phases">
-            <div><span>Early</span><strong>{game.earlyScore}</strong></div>
-            <div><span>Mid</span><strong>{game.midScore}</strong></div>
-            <div><span>Late</span><strong>{game.lateScore}</strong></div>
-            <div><span>CS/min</span><strong>{game.csPerMin ?? '—'}</strong></div>
-            <div><span>Role</span><strong>{game.role || '—'}</strong></div>
-          </div>
-        </div>
+        <MatchExpand game={game} version={version} runeIndex={runeIndex} />
       ) : null}
     </div>
   );
