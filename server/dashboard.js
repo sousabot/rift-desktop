@@ -2,11 +2,11 @@
 
 const DASHBOARD_TTL_MS = 2 * 60 * 1000;
 const LIVE_TTL_MS = 20 * 1000;
-const CAREER_TTL_MS = 60 * 60 * 1000;
-const CAREER_MAX_GAMES = 200;
+const CAREER_TTL_MS = 6 * 60 * 60 * 1000;
+const CAREER_MAX_GAMES = 300;
 const CAREER_PAGE = 100;
 const MATCH_CONCURRENCY = 4;
-const CAREER_CONCURRENCY = 3;
+const CAREER_CONCURRENCY = 2;
 const TIMELINE_CONCURRENCY = 2;
 
 const MODE_QUEUE = { All: null, Solo: 420, Flex: 440, Aram: 450, Normal: 400 };
@@ -424,8 +424,10 @@ async function fetchCareerMatchIds(riotFetch, matchRegion, puuid) {
     const take = Math.min(CAREER_PAGE, CAREER_MAX_GAMES - start);
     let page = [];
     try {
-      page = await riotFetch(
-        `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?start=${start}&count=${take}`
+      page = await riotFetchRetry(
+        riotFetch,
+        `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?start=${start}&count=${take}`,
+        { retries: 4 }
       );
     } catch {
       break;
@@ -433,8 +435,33 @@ async function fetchCareerMatchIds(riotFetch, matchRegion, puuid) {
     if (!Array.isArray(page) || !page.length) break;
     ids.push(...page);
     if (page.length < take) break;
+    await sleep(400);
   }
   return ids;
+}
+
+async function mapCareerMatches(riotFetch, matchRegion, ids) {
+  const results = new Array(ids.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < ids.length) {
+      const i = cursor++;
+      const id = ids[i];
+      try {
+        results[i] = await riotFetchRetry(
+          riotFetch,
+          `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${id}`,
+          { retries: 4 }
+        );
+      } catch {
+        results[i] = null;
+      }
+      await sleep(75);
+    }
+  }
+  const n = Math.min(CAREER_CONCURRENCY, Math.max(1, ids.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
 }
 
 async function loadCareerSidebar(riotFetch, puuid, matchRegion) {
@@ -445,13 +472,7 @@ async function loadCareerSidebar(riotFetch, puuid, matchRegion) {
 
   const pending = (async () => {
     const ids = await fetchCareerMatchIds(riotFetch, matchRegion, puuid);
-    const matches = await mapWithConcurrency(ids, CAREER_CONCURRENCY, async (id) => {
-      try {
-        return await riotFetch(`https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${id}`);
-      } catch {
-        return null;
-      }
-    });
+    const matches = await mapCareerMatches(riotFetch, matchRegion, ids);
     const games = matches.map((m) => careerGameFromMatch(m, puuid)).filter(Boolean);
     const data = {
       games: games.length,
@@ -459,7 +480,8 @@ async function loadCareerSidebar(riotFetch, puuid, matchRegion) {
       playedWith: aggregatePlayedWith(games, puuid),
       totalPings: aggregateTotalPings(games),
     };
-    careerCache.set(key, { at: Date.now(), data });
+    // Cache even partial results so UI can show career scope.
+    if (games.length) careerCache.set(key, { at: Date.now(), data });
     return data;
   })().finally(() => {
     if (careerInflight.get(key) === pending) careerInflight.delete(key);

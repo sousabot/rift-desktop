@@ -161,15 +161,17 @@ function truncateName(name, max = 14) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
-function RolePerformanceCard({ rows, career, careerGames, recentCount, loading }) {
+function RolePerformanceCard({ rows, career, careerGames, loading, error }) {
   if (!rows?.length) {
     return (
       <article className="wd-side-card">
         <header>
           <h3>Role Performance</h3>
-          <SideScopeNote career={career} careerGames={careerGames} recentCount={recentCount} loading={loading} />
+          <SideScopeNote career={career} careerGames={careerGames} loading={loading} error={error} />
         </header>
-        <p className="muted" style={{ padding: '4px 0 0' }}>No role data yet.</p>
+        <p className="muted" style={{ padding: '4px 0 0' }}>
+          {loading ? 'Loading career roles…' : 'No role data yet.'}
+        </p>
       </article>
     );
   }
@@ -177,7 +179,7 @@ function RolePerformanceCard({ rows, career, careerGames, recentCount, loading }
     <article className="wd-side-card">
       <header>
         <h3>Role Performance</h3>
-        <SideScopeNote career={career} careerGames={careerGames} recentCount={recentCount} loading={loading} />
+        <SideScopeNote career={career} careerGames={careerGames} loading={loading} error={error} />
       </header>
       <div className="wd-role-table-head">
         <span>Role</span>
@@ -200,15 +202,17 @@ function RolePerformanceCard({ rows, career, careerGames, recentCount, loading }
   );
 }
 
-function PlayedWithCard({ rows, version, career, careerGames, recentCount, loading }) {
+function PlayedWithCard({ rows, version, career, careerGames, loading, error }) {
   if (!rows?.length) {
     return (
       <article className="wd-side-card">
         <header>
           <h3>Played With</h3>
-          <SideScopeNote career={career} careerGames={careerGames} recentCount={recentCount} loading={loading} />
+          <SideScopeNote career={career} careerGames={careerGames} loading={loading} error={error} />
         </header>
-        <p className="muted" style={{ padding: '4px 0 0' }}>No frequent teammates yet.</p>
+        <p className="muted" style={{ padding: '4px 0 0' }}>
+          {loading ? 'Loading teammates…' : 'No frequent teammates yet.'}
+        </p>
       </article>
     );
   }
@@ -216,7 +220,7 @@ function PlayedWithCard({ rows, version, career, careerGames, recentCount, loadi
     <article className="wd-side-card">
       <header>
         <h3>Played With</h3>
-        <SideScopeNote career={career} careerGames={careerGames} recentCount={recentCount} loading={loading} />
+        <SideScopeNote career={career} careerGames={careerGames} loading={loading} error={error} />
       </header>
       <div className="wd-played-list">
         {rows.map((row) => (
@@ -246,15 +250,16 @@ const TOTAL_PING_KEYS = [
   { key: 'allIn', label: 'All-In' },
 ];
 
-function SideScopeNote({ career, careerGames, recentCount, loading }) {
+function SideScopeNote({ career, careerGames, loading, error }) {
   if (loading) return <span className="wd-side-scope is-loading">Loading career…</span>;
+  if (error) return <span className="wd-side-scope is-error">Career unavailable</span>;
   if (career && careerGames) {
-    return <span className="wd-side-scope">All queues · {careerGames} games</span>;
+    return <span className="wd-side-scope">Career · all queues · {careerGames} games</span>;
   }
-  return <span className="wd-side-scope">Last {recentCount || 0} games</span>;
+  return <span className="wd-side-scope">Career · all time</span>;
 }
 
-function TotalPingsCard({ totalPings, career, careerGames, recentCount, loading }) {
+function TotalPingsCard({ totalPings, career, careerGames, loading, error }) {
   const totals = totalPings?.totals || {};
   const averages = totalPings?.averages || {};
   return (
@@ -264,8 +269,8 @@ function TotalPingsCard({ totalPings, career, careerGames, recentCount, loading 
         <SideScopeNote
           career={career}
           careerGames={careerGames}
-          recentCount={recentCount}
           loading={loading}
+          error={error}
         />
       </header>
       <div className="wd-pings-grid">
@@ -447,6 +452,7 @@ export default function Dashboard() {
   const [liveGame, setLiveGame] = useState(null);
   const [query, setQuery] = useState(activeId);
   const [careerLoading, setCareerLoading] = useState(false);
+  const [careerError, setCareerError] = useState(false);
   const loadSeq = useRef(0);
 
   useEffect(() => {
@@ -506,36 +512,60 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, session?.platform, session?.region]);
 
-  // Role / Played With / Pings from all-queue career history (not last 20 Solo).
+  // Career Role / Played With / Pings — delayed so match history can finish first.
   useEffect(() => {
     if (!profile?.puuid || profile.careerSidebar) {
       setCareerLoading(false);
+      setCareerError(false);
       return undefined;
     }
     const parsed = parseRiotIdInput(activeId);
     if (!parsed.gameName || !parsed.tagLine) return undefined;
     let cancelled = false;
     setCareerLoading(true);
-    getCareerSidebar({
-      gameName: parsed.gameName,
-      tagLine: parsed.tagLine,
-      platform: lookup.platform,
-      region: lookup.region,
-    }).then((career) => {
-      if (cancelled || !career?.careerSidebar) return;
-      setProfile((prev) => {
-        if (!prev || prev.puuid !== career.puuid) return prev;
-        return {
-          ...prev,
-          rolePerformance: career.rolePerformance,
-          playedWith: career.playedWith,
-          totalPings: career.totalPings,
-          careerSidebar: true,
-          careerGames: career.careerGames,
-        };
-      });
-    }).catch(() => { /* keep recent-game fallback */ })
-      .finally(() => { if (!cancelled) setCareerLoading(false); });
+    setCareerError(false);
+
+    const run = async () => {
+      // Let dashboard match/timeline requests settle before career burn.
+      await new Promise((r) => setTimeout(r, 2500));
+      if (cancelled) return;
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const career = await getCareerSidebar({
+            gameName: parsed.gameName,
+            tagLine: parsed.tagLine,
+            platform: lookup.platform,
+            region: lookup.region,
+          });
+          if (cancelled) return;
+          if (!career?.careerSidebar) {
+            lastErr = new Error('empty career');
+            await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+            continue;
+          }
+          setProfile((prev) => {
+            if (!prev || prev.puuid !== career.puuid) return prev;
+            return {
+              ...prev,
+              rolePerformance: career.rolePerformance,
+              playedWith: career.playedWith,
+              totalPings: career.totalPings,
+              careerSidebar: true,
+              careerGames: career.careerGames,
+            };
+          });
+          setCareerError(false);
+          return;
+        } catch (err) {
+          lastErr = err;
+          await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)));
+        }
+      }
+      if (!cancelled && lastErr) setCareerError(true);
+    };
+
+    run().finally(() => { if (!cancelled) setCareerLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.puuid, profile?.careerSidebar, activeId]);
@@ -784,23 +814,23 @@ export default function Dashboard() {
                   rows={sideExtras.rolePerformance}
                   career={profile.careerSidebar}
                   careerGames={profile.careerGames}
-                  recentCount={overview.games}
                   loading={careerLoading}
+                  error={careerError}
                 />
                 <PlayedWithCard
                   rows={sideExtras.playedWith}
                   version={version}
                   career={profile.careerSidebar}
                   careerGames={profile.careerGames}
-                  recentCount={overview.games}
                   loading={careerLoading}
+                  error={careerError}
                 />
                 <TotalPingsCard
                   totalPings={sideExtras.totalPings}
                   career={profile.careerSidebar}
                   careerGames={profile.careerGames}
-                  recentCount={overview.games}
                   loading={careerLoading}
+                  error={careerError}
                 />
               </aside>
 

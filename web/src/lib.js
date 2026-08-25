@@ -146,25 +146,32 @@ const ROLE_PERF_LABELS = {
 };
 const TOTAL_PING_AGG_KEYS = ['assist', 'onMyWay', 'missing', 'needVision', 'enemyVision', 'allIn'];
 
-/** Prefer server career sidebar when present; else derive from recentGames. */
+const EMPTY_PING_TOTALS = {
+  games: 0,
+  totals: {
+    assist: 0, onMyWay: 0, missing: 0, needVision: 0, enemyVision: 0, allIn: 0,
+  },
+  averages: {
+    assist: 0, onMyWay: 0, missing: 0, needVision: 0, enemyVision: 0, allIn: 0,
+  },
+};
+
+/** Career sidebar only — never fall back to last-20 Solo games. */
 export function deriveDashboardExtras(profile) {
-  const games = Array.isArray(profile?.recentGames) ? profile.recentGames : [];
+  const career = Boolean(profile?.careerSidebar);
   const apiRoles = Array.isArray(profile?.rolePerformance) ? profile.rolePerformance : [];
   const apiPlayed = Array.isArray(profile?.playedWith) ? profile.playedWith : [];
-  const useCareer = Boolean(profile?.careerSidebar)
-    || (apiRoles.reduce((s, r) => s + (Number(r.games) || 0), 0) > games.length);
 
-  const rolePerformance = useCareer && apiRoles.length >= 5
+  const rolePerformance = career && apiRoles.length
     ? apiRoles
-    : deriveRolePerformance(games);
-  const playedWith = (useCareer && apiPlayed.length
-    ? apiPlayed
-    : derivePlayedWith(games, profile?.puuid)
-  ).slice(0, 4);
-  const totalPings = useCareer && profile?.totalPings?.totals
+    : deriveRolePerformance([]); // empty 5-role skeleton
+  const playedWith = career && apiPlayed.length
+    ? apiPlayed.slice(0, 4)
+    : [];
+  const totalPings = career && profile?.totalPings?.totals
     ? profile.totalPings
-    : deriveTotalPings(games);
-  return { rolePerformance, playedWith, totalPings };
+    : EMPTY_PING_TOTALS;
+  return { rolePerformance, playedWith, totalPings, career };
 }
 
 function deriveRolePerformance(games) {

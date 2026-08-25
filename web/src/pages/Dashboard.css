@@ -319,6 +319,9 @@
 .wd-side-scope.is-loading {
   color: var(--muted);
 }
+.wd-side-scope.is-error {
+  color: #ff5c68;
+}
 
 .wd-role-table-head,
 .wd-role-table-row {
