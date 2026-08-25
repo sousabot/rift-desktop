@@ -258,6 +258,29 @@ function registerWebApi(router) {
       buildSource: builds?.source || null,
     };
   });
+
+  const { getDashboard, getLiveGame } = require('./dashboard');
+
+  router.get('/v1/web/dashboard', async (req, url, riotFetch) => {
+    const gameName = url.searchParams.get('gameName') || url.searchParams.get('name') || '';
+    const tagLine = url.searchParams.get('tagLine') || url.searchParams.get('tag') || '';
+    const platform = url.searchParams.get('platform') || 'euw1';
+    const region = url.searchParams.get('region') || '';
+    const mode = url.searchParams.get('mode') || 'Solo';
+    const queue = url.searchParams.get('queue');
+    const count = url.searchParams.get('count') || '20';
+    return getDashboard(riotFetch, {
+      gameName, tagLine, platform, region, mode, queue, count,
+    });
+  });
+
+  router.get('/v1/web/live', async (req, url, riotFetch) => {
+    const gameName = url.searchParams.get('gameName') || url.searchParams.get('name') || '';
+    const tagLine = url.searchParams.get('tagLine') || url.searchParams.get('tag') || '';
+    const platform = url.searchParams.get('platform') || 'euw1';
+    const region = url.searchParams.get('region') || '';
+    return getLiveGame(riotFetch, { gameName, tagLine, platform, region });
+  });
 }
 
 module.exports = { registerWebApi, lookupAccount, getLeaderboard, matchRegionOf };

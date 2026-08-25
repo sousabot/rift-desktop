@@ -18,7 +18,12 @@
     "dist": "node server/prepare-client-env.js && vite build && node scripts/electron-build.cjs",
     "dist:portable": "node server/prepare-client-env.js && vite build && node scripts/electron-build.cjs --portable",
     "release": "node server/prepare-client-env.js && vite build && node scripts/electron-build.cjs --release",
-    "site:version": "node scripts/sync-site-version.js"
+    "site:version": "node scripts/sync-site-version.js",
+    "web:dev": "vite --config web/vite.config.js",
+    "web:build": "vite build --config web/vite.config.js",
+    "social:patch": "node scripts/render-social-post.js patch",
+    "social:matchup": "node scripts/render-social-post.js matchup",
+    "social:tier": "node scripts/render-social-post.js tier"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -33,6 +38,7 @@
     "concurrently": "^8.2.2",
     "electron": "^31.3.0",
     "electron-builder": "^25.1.8",
+    "playwright": "^1.62.1",
     "rcedit": "^5.0.2",
     "vite": "^5.4.1",
     "wait-on": "^7.2.0"

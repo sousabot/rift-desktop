@@ -1,0 +1,582 @@
+/** Public summoner dashboard — match stats without desktop Bearer / LCU. */
+
+const DASHBOARD_TTL_MS = 2 * 60 * 1000;
+const LIVE_TTL_MS = 20 * 1000;
+const TIMELINE_LIMIT = 10;
+const MATCH_CONCURRENCY = 4;
+
+const MODE_QUEUE = { All: null, Solo: 420, Flex: 440, Aram: 450, Normal: 400 };
+
+const QUEUE_NAMES = {
+  400: 'Normal',
+  420: 'Solo/Duo',
+  440: 'Flex',
+  450: 'ARAM',
+  700: 'Clash',
+  900: 'URF',
+  1020: 'One for All',
+  1300: 'Nexus Blitz',
+  1400: 'Ultimate Spellbook',
+  1700: 'Arena',
+  1900: 'Pick URF',
+};
+
+const PLATFORM_LABEL = {
+  euw1: 'EUW', eun1: 'EUNE', na1: 'NA', br1: 'BR', la1: 'LAN', la2: 'LAS',
+  kr: 'KR', jp1: 'JP', oc1: 'OCE', tr1: 'TR', ru: 'RU', me1: 'ME',
+  ph2: 'PH', sg2: 'SG', th2: 'TH', tw2: 'TW', vn2: 'VN',
+};
+
+const TIER_BASE = {
+  IRON: 0, BRONZE: 400, SILVER: 800, GOLD: 1200, PLATINUM: 1600,
+  EMERALD: 2000, DIAMOND: 2400, MASTER: 2800, GRANDMASTER: 2800, CHALLENGER: 2800,
+};
+const DIV_LP = { IV: 0, III: 100, II: 200, I: 300 };
+
+const ROLE_KEYS = {
+  TOP: 'TOP', JUNGLE: 'JUNGLE', JNG: 'JUNGLE', MIDDLE: 'MIDDLE', MID: 'MIDDLE',
+  BOTTOM: 'BOTTOM', BOT: 'BOTTOM', ADC: 'BOTTOM', UTILITY: 'UTILITY', SUPPORT: 'UTILITY', SUP: 'UTILITY',
+};
+const WEIGHTS = {
+  TOP: { kda: 0.26, kp: 0.16, dmg: 0.22, csm: 0.20, vis: 0.08, win: 0.08 },
+  JUNGLE: { kda: 0.24, kp: 0.22, dmg: 0.16, csm: 0.14, vis: 0.16, win: 0.08 },
+  MIDDLE: { kda: 0.26, kp: 0.18, dmg: 0.24, csm: 0.16, vis: 0.08, win: 0.08 },
+  BOTTOM: { kda: 0.26, kp: 0.18, dmg: 0.26, csm: 0.16, vis: 0.06, win: 0.08 },
+  UTILITY: { kda: 0.22, kp: 0.28, dmg: 0.08, csm: 0.04, vis: 0.30, win: 0.08 },
+  ARAM: { kda: 0.32, kp: 0.28, dmg: 0.32, csm: 0.00, vis: 0.00, win: 0.08 },
+  DEFAULT: { kda: 0.26, kp: 0.20, dmg: 0.20, csm: 0.14, vis: 0.12, win: 0.08 },
+};
+const BENCH = {
+  TOP: { kda: [2.4, 5.0], kp: [0.42, 0.70], dmg: [0.20, 0.32], csm: [7.0, 9.5], vis: [0.7, 1.4] },
+  JUNGLE: { kda: [2.8, 5.5], kp: [0.52, 0.78], dmg: [0.18, 0.30], csm: [5.2, 8.0], vis: [1.1, 2.0] },
+  MIDDLE: { kda: [2.8, 5.5], kp: [0.48, 0.75], dmg: [0.24, 0.36], csm: [7.4, 10.0], vis: [0.7, 1.4] },
+  BOTTOM: { kda: [3.0, 6.0], kp: [0.52, 0.78], dmg: [0.26, 0.38], csm: [8.0, 10.5], vis: [0.6, 1.2] },
+  UTILITY: { kda: [2.8, 6.0], kp: [0.62, 0.88], dmg: [0.10, 0.20], csm: [1.2, 2.5], vis: [1.8, 3.2] },
+  ARAM: { kda: [3.0, 6.5], kp: [0.55, 0.82], dmg: [0.20, 0.32], csm: [1, 1], vis: [1, 1] },
+  DEFAULT: { kda: [2.6, 5.2], kp: [0.50, 0.75], dmg: [0.20, 0.32], csm: [6.0, 9.0], vis: [0.9, 1.8] },
+};
+
+const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+const PHASE_BOUNDARIES = { early: 15 * 60 * 1000, mid: 25 * 60 * 1000 };
+const PHASE_NEUTRAL = 50;
+
+const cache = new Map();
+const inflight = new Map();
+const liveCache = new Map();
+let champMeta = { at: 0, map: {}, total: 0 };
+
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, Math.max(1, items.length)) }, () => worker()));
+  return results;
+}
+
+function formatTier(tier) {
+  const t = String(tier || '');
+  return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+}
+
+function estimateRankMmr(tier, division, lp) {
+  const t = String(tier || '').toUpperCase();
+  const base = TIER_BASE[t];
+  if (base == null) return null;
+  const apex = t === 'MASTER' || t === 'GRANDMASTER' || t === 'CHALLENGER';
+  const div = apex ? 0 : (DIV_LP[String(division || '').toUpperCase()] ?? 0);
+  const points = Number(lp);
+  return base + div + (Number.isFinite(points) ? points : 0);
+}
+
+function estimateMmrFromRecord(visibleMmr, wins, losses) {
+  if (visibleMmr == null || !Number.isFinite(visibleMmr)) return null;
+  const w = Number(wins);
+  const l = Number(losses);
+  if (!Number.isFinite(w) || !Number.isFinite(l) || w + l < 8) return null;
+  const prior = 10;
+  const wr = (w + prior * 0.5) / (w + l + prior);
+  if (wr <= 0.02 || wr >= 0.98) return Math.round(visibleMmr + (wr > 0.5 ? 400 : -400));
+  return Math.round(visibleMmr + 400 * Math.log10(wr / (1 - wr)));
+}
+
+function soloRank(entries, queue) {
+  const list = Array.isArray(entries) ? entries : [];
+  const solo = list.find((r) => r.queueType === 'RANKED_SOLO_5x5');
+  const flex = list.find((r) => r.queueType === 'RANKED_FLEX_SR');
+  const pick = queue === 440 ? (flex || solo) : (solo || flex);
+  if (!pick?.tier) {
+    return {
+      rank: 'Unranked', lp: null, wins: null, losses: null,
+      estMmr: null, rankTier: null, rankDivision: null,
+    };
+  }
+  const apex = ['MASTER', 'GRANDMASTER', 'CHALLENGER'].includes(String(pick.tier).toUpperCase());
+  const division = !apex && pick.rank ? ` ${pick.rank}` : '';
+  const flexLabel = queue !== 440 && pick === flex && pick !== solo ? ' Flex' : '';
+  return {
+    rank: `${formatTier(pick.tier)}${division}${flexLabel}`,
+    rankTier: pick.tier,
+    rankDivision: apex ? null : pick.rank || null,
+    lp: pick.leaguePoints ?? null,
+    wins: pick.wins ?? null,
+    losses: pick.losses ?? null,
+    estMmr: estimateRankMmr(pick.tier, pick.rank, pick.leaguePoints),
+  };
+}
+
+function scale(value, par, excellent) {
+  const v = Number(value);
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  if (excellent <= par) return v >= par ? 55 : (v / par) * 55;
+  if (v <= par) return (v / par) * 55;
+  return Math.min(100, 55 + ((v - par) / (excellent - par)) * 45);
+}
+
+function normalizeRole(position) {
+  return ROLE_KEYS[String(position || '').toUpperCase()] || 'DEFAULT';
+}
+
+function computeGdScore({ kda, kp, damageShare, csm, visionPerMin, win, role, queueId }) {
+  const lane = normalizeRole(role);
+  const key = Number(queueId) === 450 ? 'ARAM' : (WEIGHTS[lane] ? lane : 'DEFAULT');
+  const w = WEIGHTS[key];
+  const b = BENCH[key];
+  const parts = {
+    kda: scale(kda, b.kda[0], b.kda[1]),
+    kp: scale(kp, b.kp[0], b.kp[1]),
+    dmg: scale(damageShare, b.dmg[0], b.dmg[1]),
+    csm: w.csm ? scale(csm, b.csm[0], b.csm[1]) : 50,
+    vis: w.vis ? scale(visionPerMin, b.vis[0], b.vis[1]) : 50,
+    win: win ? 100 : 38,
+  };
+  const raw = parts.kda * w.kda + parts.kp * w.kp + parts.dmg * w.dmg
+    + parts.csm * w.csm + parts.vis * w.vis + parts.win * w.win;
+  return Math.round(Math.min(100, Math.max(0, raw)));
+}
+
+function gdScoreFromParticipant(p, match) {
+  if (!p || !match?.info) return 50;
+  const mins = Math.max(1, (match.info.gameDuration || 1) / 60);
+  const team = match.info.participants.filter((pp) => pp.teamId === p.teamId);
+  const teamKills = team.reduce((sum, pp) => sum + (pp.kills || 0), 0);
+  const teamDamage = team.reduce((sum, pp) => sum + (pp.totalDamageDealtToChampions || 0), 0);
+  const damage = p.totalDamageDealtToChampions || 0;
+  return computeGdScore({
+    kda: (p.kills + p.assists) / Math.max(1, p.deaths),
+    kp: teamKills > 0 ? (p.kills + p.assists) / teamKills : 0,
+    damageShare: teamDamage ? damage / teamDamage : 0,
+    csm: ((p.totalMinionsKilled || 0) + (p.neutralMinionsKilled || 0)) / mins,
+    visionPerMin: (p.visionScore || 0) / mins,
+    win: !!p.win,
+    role: p.teamPosition || p.individualPosition || '',
+    queueId: match.info.queueId,
+  });
+}
+
+function timeAgo(ts) {
+  if (!ts) return '—';
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function goldDiffAtTimestamp(timeline, selfId, oppId, ts) {
+  if (!timeline?.info?.frames?.length) return null;
+  const frame = timeline.info.frames.filter((f) => f.timestamp <= ts).pop();
+  if (!frame) return null;
+  const selfFrame = frame.participantFrames[String(selfId)];
+  const oppFrame = frame.participantFrames[String(oppId)];
+  return selfFrame && oppFrame ? selfFrame.totalGold - oppFrame.totalGold : null;
+}
+
+function computeAt15(timeline, match, self) {
+  const empty = { goldDiff15: null, kaDiff15: null };
+  if (!timeline?.info?.frames?.length) return empty;
+  const lanePos = (participant) => {
+    const pos = participant?.teamPosition || participant?.individualPosition || '';
+    return pos && pos !== 'INVALID' ? pos : '';
+  };
+  const selfPos = lanePos(self);
+  const selfId = self.participantId;
+  const opp = selfPos
+    ? match.info.participants.find((pp) => pp.teamId !== self.teamId && lanePos(pp) === selfPos)
+    : null;
+  const oppId = opp?.participantId;
+  const frames = timeline.info.frames;
+  const frameAt15 = frames.filter((f) => f.timestamp <= FIFTEEN_MIN_MS).pop();
+  if (!frameAt15) return empty;
+  const selfFrame = frameAt15.participantFrames[String(selfId)];
+  const oppFrame = oppId != null ? frameAt15.participantFrames[String(oppId)] : null;
+  const goldDiff15 = selfFrame && oppFrame ? selfFrame.totalGold - oppFrame.totalGold : null;
+
+  let selfKA = 0;
+  let oppKA = 0;
+  for (const f of frames) {
+    if (f.timestamp > FIFTEEN_MIN_MS) break;
+    for (const ev of f.events || []) {
+      if (ev.timestamp > FIFTEEN_MIN_MS || ev.type !== 'CHAMPION_KILL') continue;
+      if (ev.killerId === selfId || (ev.assistingParticipantIds || []).includes(selfId)) selfKA += 1;
+      if (oppId != null && (ev.killerId === oppId || (ev.assistingParticipantIds || []).includes(oppId))) oppKA += 1;
+    }
+  }
+  return {
+    goldDiff15,
+    kaDiff15: oppId != null ? selfKA - oppKA : null,
+  };
+}
+
+function computePhaseScores(timeline, match, self) {
+  const neutral = { early: PHASE_NEUTRAL, mid: PHASE_NEUTRAL, late: PHASE_NEUTRAL };
+  if (!timeline?.info?.frames?.length || !self.teamPosition) return neutral;
+  const opp = match.info.participants.find(
+    (pp) => pp.teamId !== self.teamId && pp.teamPosition === self.teamPosition
+  );
+  if (!opp) return neutral;
+  const selfId = self.participantId;
+  const oppId = opp.participantId;
+  const lastFrame = timeline.info.frames[timeline.info.frames.length - 1];
+  const endTs = Math.max(lastFrame?.timestamp ?? PHASE_BOUNDARIES.mid, PHASE_BOUNDARIES.mid);
+  const toScore = (diff) => (
+    diff === null ? PHASE_NEUTRAL : Math.round(Math.min(100, Math.max(0, PHASE_NEUTRAL + diff / 30)))
+  );
+  return {
+    early: toScore(goldDiffAtTimestamp(timeline, selfId, oppId, PHASE_BOUNDARIES.early)),
+    mid: toScore(goldDiffAtTimestamp(timeline, selfId, oppId, PHASE_BOUNDARIES.mid)),
+    late: toScore(goldDiffAtTimestamp(timeline, selfId, oppId, endTs)),
+  };
+}
+
+async function getChampionMeta() {
+  if (champMeta.at && Date.now() - champMeta.at < 12 * 60 * 60 * 1000 && champMeta.total) {
+    return champMeta;
+  }
+  try {
+    const verRes = await fetch('https://ddragon.leagueoflegends.com/api/versions.json');
+    const versions = await verRes.json();
+    const ver = versions[0];
+    const dataRes = await fetch(`https://ddragon.leagueoflegends.com/cdn/${ver}/data/en_US/champion.json`);
+    const data = await dataRes.json();
+    const map = {};
+    Object.values(data.data || {}).forEach((c) => {
+      map[String(c.key)] = c.id;
+    });
+    champMeta = { at: Date.now(), map, total: Object.keys(map).length, version: ver };
+  } catch {
+    /* keep last */
+  }
+  return champMeta;
+}
+
+function flatDeltas() {
+  const keys = ['kda', 'gdScore', 'kp', 'csm', 'visionScore', 'gpm', 'goldDiff15', 'kaDiff15'];
+  const out = {};
+  keys.forEach((k) => { out[k] = { delta: '+0.0', dir: 'flat' }; });
+  return out;
+}
+
+function resolveModeQueue(mode, queueParam) {
+  if (queueParam != null && queueParam !== '') {
+    const n = Number(queueParam);
+    return Number.isFinite(n) ? n : null;
+  }
+  const key = String(mode || 'Solo');
+  return Object.prototype.hasOwnProperty.call(MODE_QUEUE, key) ? MODE_QUEUE[key] : 420;
+}
+
+async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, mode, queue, count }) {
+  const { lookupAccount, matchRegionOf } = require('./web-api');
+  const account = await lookupAccount(riotFetch, { gameName, tagLine, platform, region });
+  const shard = account.platform;
+  const matchRegion = account.region || matchRegionOf(shard);
+  const matchCount = Math.min(Math.max(Number(count) || 20, 1), 20);
+  const q = resolveModeQueue(mode, queue);
+
+  let matchIds = [];
+  try {
+    const qParam = q != null ? `&queue=${q}` : '';
+    matchIds = await riotFetch(
+      `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/${account.puuid}/ids?start=0&count=${matchCount}${qParam}`
+    );
+  } catch {
+    matchIds = [];
+  }
+  if (!Array.isArray(matchIds)) matchIds = [];
+
+  const timelineIds = matchIds.slice(0, TIMELINE_LIMIT);
+  const [matches, timelines, masteries, meta] = await Promise.all([
+    mapWithConcurrency(matchIds, MATCH_CONCURRENCY, async (id) => {
+      try {
+        return await riotFetch(`https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${id}`);
+      } catch {
+        return null;
+      }
+    }),
+    mapWithConcurrency(timelineIds, MATCH_CONCURRENCY, async (id) => {
+      try {
+        return await riotFetch(`https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${id}/timeline`);
+      } catch {
+        return null;
+      }
+    }),
+    riotFetch(`https://${shard}.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-puuid/${account.puuid}`)
+      .catch(() => []),
+    getChampionMeta(),
+  ]);
+
+  let ranked = [];
+  try {
+    ranked = await riotFetch(`https://${shard}.api.riotgames.com/lol/league/v4/entries/by-puuid/${account.puuid}`);
+  } catch { /* optional */ }
+
+  let ladderRank = null;
+  const rankedInfo = soloRank(ranked, q == null ? 420 : q);
+  if (rankedInfo.rankTier && ['MASTER', 'GRANDMASTER', 'CHALLENGER'].includes(String(rankedInfo.rankTier).toUpperCase())) {
+    try {
+      const tier = String(rankedInfo.rankTier).toLowerCase();
+      const league = await riotFetch(
+        `https://${shard}.api.riotgames.com/lol/league/v4/${tier}leagues/by-queue/RANKED_SOLO_5x5`
+      );
+      const sorted = [...(league.entries || [])].sort((a, b) => b.leaguePoints - a.leaguePoints);
+      const idx = sorted.findIndex((e) => e.puuid === account.puuid);
+      if (idx !== -1) ladderRank = idx + 1;
+    } catch { /* optional */ }
+  }
+
+  const champFromId = (id) => (Number(id) > 0 ? (meta.map[String(id)] || null) : null);
+  const teamBans = (match, teamId) => (
+    ((match?.info?.teams || []).find((team) => team.teamId === teamId)?.bans || [])
+      .slice()
+      .sort((a, b) => (Number(a.pickTurn) || 0) - (Number(b.pickTurn) || 0))
+      .map((b) => ({
+        teamId,
+        pickTurn: b.pickTurn,
+        championId: b.championId,
+        champion: champFromId(b.championId),
+      }))
+  );
+
+  const puuid = account.puuid;
+  const recentGames = (matches || []).map((m, idx) => {
+    if (!m?.info) return null;
+    const p = m.info.participants?.find((pp) => pp.puuid === puuid);
+    if (!p) return null;
+    const mins = Math.max(1, m.info.gameDuration / 60);
+    const kda = ((p.kills + p.assists) / Math.max(1, p.deaths)).toFixed(1);
+    const teamKills = m.info.participants
+      .filter((pp) => pp.teamId === p.teamId)
+      .reduce((sum, pp) => sum + pp.kills, 0);
+    const { goldDiff15, kaDiff15 } = computeAt15(timelines[idx], m, p);
+    const phases = computePhaseScores(timelines[idx], m, p);
+    const allyTeam = [
+      p.championName,
+      ...m.info.participants
+        .filter((pp) => pp.teamId === p.teamId && pp.puuid !== puuid)
+        .map((pp) => pp.championName),
+    ];
+    const enemyTeam = m.info.participants
+      .filter((pp) => pp.teamId !== p.teamId)
+      .map((pp) => pp.championName);
+    const gdScore = gdScoreFromParticipant(p, m);
+    return {
+      matchId: m.metadata.matchId,
+      win: p.win,
+      champion: p.championName,
+      kills: p.kills,
+      deaths: p.deaths,
+      assists: p.assists,
+      cs: p.totalMinionsKilled + p.neutralMinionsKilled,
+      durationMin: Math.floor(mins),
+      durationSec: Math.round(m.info.gameDuration % 60),
+      kda,
+      ago: timeAgo(m.info.gameEndTimestamp),
+      gdScore,
+      queueId: m.info.queueId,
+      queueLabel: QUEUE_NAMES[m.info.queueId] || 'Other',
+      queueType: QUEUE_NAMES[m.info.queueId] || 'Other',
+      region: PLATFORM_LABEL[shard] || String(shard).toUpperCase(),
+      gpm: p.goldEarned / mins,
+      visionPerMin: p.visionScore / mins,
+      kp: teamKills > 0 ? (p.kills + p.assists) / teamKills : 0,
+      goldDiff15,
+      kaDiff15,
+      earlyScore: phases.early,
+      midScore: phases.mid,
+      lateScore: phases.late,
+      deaths4: p.deaths,
+      killsAssists: p.kills + p.assists,
+      csm: p.totalMinionsKilled + p.neutralMinionsKilled,
+      allyTeam,
+      enemyTeam,
+      allyBans: teamBans(m, p.teamId),
+      enemyBans: teamBans(m, p.teamId === 200 ? 100 : 200),
+    };
+  }).filter(Boolean);
+
+  const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+  const kdaVal = avg(recentGames.map((g) => (g.kills + g.assists) / Math.max(1, g.deaths)));
+  const csPerMin = avg(recentGames.map((g) => g.cs / Math.max(1, g.durationMin)));
+  const gdScoreVal = avg(recentGames.map((g) => g.gdScore));
+  const gpmVal = avg(recentGames.map((g) => g.gpm));
+  const visionVal = avg(recentGames.map((g) => g.visionPerMin));
+  const kpVal = avg(recentGames.map((g) => g.kp));
+  const gd15Vals = recentGames.map((g) => g.goldDiff15).filter((v) => v !== null);
+  const ka15Vals = recentGames.map((g) => g.kaDiff15).filter((v) => v !== null);
+  const gd15Val = gd15Vals.length ? avg(gd15Vals) : null;
+  const ka15Val = ka15Vals.length ? avg(ka15Vals) : null;
+  const fmtSigned = (v) => (v >= 0 ? '+' : '') + Math.round(v);
+  const deltas = flatDeltas();
+  const last = recentGames[0] || null;
+  const avgDeaths = avg(recentGames.map((g) => g.deaths));
+  const lensScore = Math.max(0, Math.min(100, Math.round(100 - avgDeaths * 8)));
+  const lensSeries = recentGames.map((g) => Math.max(0, Math.min(100, 100 - g.deaths * 8))).reverse();
+  const estMmr = estimateMmrFromRecord(rankedInfo.estMmr, rankedInfo.wins, rankedInfo.losses)
+    ?? rankedInfo.estMmr;
+
+  return {
+    riotId: `${account.gameName}#${account.tagLine}`,
+    gameName: account.gameName,
+    tagLine: account.tagLine,
+    puuid,
+    platform: shard,
+    region: PLATFORM_LABEL[shard] || String(shard).toUpperCase(),
+    matchRegion,
+    profileIconId: account.profileIconId || 29,
+    summonerLevel: account.summonerLevel ?? null,
+    rank: rankedInfo.rank,
+    ladderRank,
+    lp: rankedInfo.lp,
+    estMmr,
+    rankTier: rankedInfo.rankTier,
+    rankDivision: rankedInfo.rankDivision,
+    wins: rankedInfo.wins,
+    losses: rankedInfo.losses,
+    seasonPeak: null,
+    stats: {
+      kda: kdaVal.toFixed(1),
+      kdaDelta: deltas.kda.delta, kdaDeltaDir: deltas.kda.dir,
+      gdScore: gdScoreVal.toFixed(1), gdDelta: deltas.gdScore.delta, gdDeltaDir: deltas.gdScore.dir,
+      kp: kpVal.toFixed(2), kpDelta: deltas.kp.delta, kpDeltaDir: deltas.kp.dir,
+      csm: csPerMin.toFixed(1), csmDelta: deltas.csm.delta, csmDeltaDir: deltas.csm.dir,
+      visionScore: visionVal.toFixed(1), visionDelta: deltas.visionScore.delta, visionDeltaDir: deltas.visionScore.dir,
+      gpm: gpmVal.toFixed(0), gpmDelta: deltas.gpm.delta, gpmDeltaDir: deltas.gpm.dir,
+      goldDiff15: gd15Val !== null ? fmtSigned(gd15Val) : '—',
+      goldDiff15Delta: deltas.goldDiff15.delta, goldDiff15DeltaDir: deltas.goldDiff15.dir,
+      kaDiff15: ka15Val !== null ? fmtSigned(ka15Val) : '—',
+      kaDiff15Delta: deltas.kaDiff15.delta, kaDiff15DeltaDir: deltas.kaDiff15.dir,
+    },
+    sparklines: {
+      kda: recentGames.map((g) => (g.kills + g.assists) / Math.max(1, g.deaths)),
+      gdScore: recentGames.map((g) => g.gdScore),
+      kp: recentGames.map((g) => g.kp),
+      csm: recentGames.map((g) => g.cs / Math.max(1, g.durationMin)),
+      vision: recentGames.map((g) => g.visionPerMin),
+      gpm: recentGames.map((g) => g.gpm),
+      goldDiff15: recentGames.map((g) => g.goldDiff15 ?? 0),
+      kaDiff15: recentGames.map((g) => g.kaDiff15 ?? 0),
+    },
+    lastGame: last,
+    recentGames,
+    collections: {
+      played: Array.isArray(masteries) ? masteries.length : 0,
+      total: meta.total || 0,
+    },
+    lens: {
+      score: lensScore,
+      series: lensSeries.length ? lensSeries : [50],
+      avgDeaths: Number(avgDeaths.toFixed(1)),
+    },
+    ddragonVersion: meta.version || null,
+  };
+}
+
+async function getDashboard(riotFetch, opts) {
+  const key = [
+    String(opts.gameName || '').toLowerCase(),
+    String(opts.tagLine || '').toLowerCase(),
+    String(opts.platform || ''),
+    String(opts.mode || 'Solo'),
+    String(opts.queue ?? ''),
+    String(opts.count || 20),
+  ].join('|');
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < DASHBOARD_TTL_MS) return hit.data;
+  if (inflight.has(key)) return inflight.get(key);
+
+  const pending = loadDashboard(riotFetch, opts)
+    .then((data) => {
+      cache.set(key, { at: Date.now(), data });
+      return data;
+    })
+    .finally(() => {
+      if (inflight.get(key) === pending) inflight.delete(key);
+    });
+  inflight.set(key, pending);
+  return pending;
+}
+
+async function getLiveGame(riotFetch, { gameName, tagLine, platform, region }) {
+  const { lookupAccount } = require('./web-api');
+  const account = await lookupAccount(riotFetch, { gameName, tagLine, platform, region });
+  const key = `live:${account.puuid}:${account.platform}`;
+  const hit = liveCache.get(key);
+  if (hit && Date.now() - hit.at < LIVE_TTL_MS) return hit.data;
+
+  let raw = null;
+  try {
+    raw = await riotFetch(
+      `https://${account.platform}.api.riotgames.com/lol/spectator/v5/active-games/by-summoner/${account.puuid}`
+    );
+  } catch (err) {
+    if (err.status === 404) {
+      const empty = null;
+      liveCache.set(key, { at: Date.now(), data: empty });
+      return empty;
+    }
+    throw err;
+  }
+
+  const meta = await getChampionMeta();
+  const champFromId = (id) => (Number(id) > 0 ? (meta.map[String(id)] || null) : null);
+  const mapPlayer = (p) => {
+    const game = p.riotId || '';
+    const [gn, tl] = String(game).includes('#')
+      ? game.split('#')
+      : [p.riotIdGameName || p.summonerName || '', p.riotIdTagline || ''];
+    const riotId = gn && tl ? `${gn}#${tl}` : (gn || '');
+    return {
+      champion: champFromId(p.championId) || String(p.championId),
+      championId: p.championId,
+      riotId,
+      teamId: p.teamId,
+      isSelf: p.puuid === account.puuid,
+      puuid: p.puuid,
+    };
+  };
+  const participants = Array.isArray(raw?.participants) ? raw.participants : [];
+  const data = {
+    gameId: raw.gameId,
+    queueId: raw.gameQueueConfigId,
+    queueName: QUEUE_NAMES[raw.gameQueueConfigId] || 'Custom',
+    gameLength: Number(raw.gameLength) || 0,
+    source: 'spectator',
+    bans: (raw.bannedChampions || []).map((b) => ({
+      teamId: b.teamId,
+      championId: b.championId,
+      champion: champFromId(b.championId),
+      pickTurn: b.pickTurn,
+    })),
+    blue: participants.filter((p) => p.teamId === 100).map(mapPlayer),
+    red: participants.filter((p) => p.teamId === 200).map(mapPlayer),
+  };
+  liveCache.set(key, { at: Date.now(), data });
+  return data;
+}
+
+module.exports = { getDashboard, getLiveGame, MODE_QUEUE };
