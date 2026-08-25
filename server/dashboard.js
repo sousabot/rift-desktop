@@ -3,10 +3,10 @@
 const DASHBOARD_TTL_MS = 2 * 60 * 1000;
 const LIVE_TTL_MS = 20 * 1000;
 const CAREER_TTL_MS = 60 * 60 * 1000;
-const CAREER_MAX_GAMES = 400;
+const CAREER_MAX_GAMES = 200;
 const CAREER_PAGE = 100;
 const MATCH_CONCURRENCY = 4;
-const CAREER_CONCURRENCY = 6;
+const CAREER_CONCURRENCY = 3;
 const TIMELINE_CONCURRENCY = 2;
 
 const MODE_QUEUE = { All: null, Solo: 420, Flex: 440, Aram: 450, Normal: 400 };
@@ -897,6 +897,47 @@ function resolveModeQueue(mode, queueParam) {
   return Object.prototype.hasOwnProperty.call(MODE_QUEUE, key) ? MODE_QUEUE[key] : 420;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function riotFetchRetry(riotFetch, url, { retries = 3 } = {}) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    try {
+      return await riotFetch(url);
+    } catch (err) {
+      lastErr = err;
+      const status = Number(err?.status) || 0;
+      if (status !== 429 && status !== 503) throw err;
+      await sleep(1200 * (attempt + 1));
+    }
+  }
+  throw lastErr || new Error('Riot fetch failed');
+}
+
+/** Match IDs for history — retry on rate limit; widen window if queue filter is empty. */
+async function fetchRecentMatchIds(riotFetch, matchRegion, puuid, count, queue) {
+  const listUrl = (n, q) => {
+    let url = `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/${puuid}/ids?start=0&count=${n}`;
+    if (q != null) url += `&queue=${q}`;
+    return url;
+  };
+  if (queue != null) {
+    try {
+      const filtered = await riotFetchRetry(riotFetch, listUrl(count, queue));
+      if (Array.isArray(filtered) && filtered.length) return filtered;
+    } catch { /* fall through to unfiltered window */ }
+  }
+  try {
+    const take = queue != null ? Math.min(100, Math.max(count * 5, count)) : count;
+    const all = await riotFetchRetry(riotFetch, listUrl(take, null));
+    return Array.isArray(all) ? all : [];
+  } catch {
+    return [];
+  }
+}
+
 async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, mode, queue, count }) {
   const { lookupAccount, matchRegionOf } = require('./web-api');
   const account = await lookupAccount(riotFetch, { gameName, tagLine, platform, region });
@@ -905,15 +946,17 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
   const matchCount = Math.min(Math.max(Number(count) || 20, 1), 20);
   const q = resolveModeQueue(mode, queue);
 
-  // Career sidebar (Role / Played With / Pings) — all queues, not limited to last 20 Solo.
-  const careerPromise = loadCareerSidebar(riotFetch, account.puuid, matchRegion).catch(() => null);
+  // Do NOT load career here — it burns the Riot rate limit and starves match history.
+  // Warm cache only; client uses /v1/web/career-sidebar for Role / Played With / Pings.
+  const careerKey = `${matchRegion}|${account.puuid}`;
+  const careerHit = careerCache.get(careerKey);
+  const career = (careerHit && Date.now() - careerHit.at < CAREER_TTL_MS)
+    ? careerHit.data
+    : null;
 
   let matchIds = [];
   try {
-    const qParam = q != null ? `&queue=${q}` : '';
-    matchIds = await riotFetch(
-      `https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/by-puuid/${account.puuid}/ids?start=0&count=${matchCount}${qParam}`
-    );
+    matchIds = await fetchRecentMatchIds(riotFetch, matchRegion, account.puuid, matchCount, q);
   } catch {
     matchIds = [];
   }
@@ -932,11 +975,10 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     fetchTimeline(riotFetch, matchRegion, id)
   ));
 
-  const [masteries, meta, career] = await Promise.all([
+  const [masteries, meta] = await Promise.all([
     riotFetch(`https://${shard}.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-puuid/${account.puuid}`)
       .catch(() => []),
     getChampionMeta(),
-    careerPromise,
   ]);
 
   let ranked = [];
@@ -974,6 +1016,7 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
   const puuid = account.puuid;
   const recentGames = (matches || []).map((m, idx) => {
     if (!m?.info) return null;
+    if (q != null && Number(m.info.queueId) !== Number(q)) return null;
     const p = m.info.participants?.find((pp) => pp.puuid === puuid);
     if (!p) return null;
     const mins = Math.max(1, m.info.gameDuration / 60);
@@ -1072,7 +1115,7 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
       hasTimeline: extras.hasTimeline,
       scoreboard,
     };
-  }).filter(Boolean);
+  }).filter(Boolean).slice(0, matchCount);
 
   const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
   const kdaVal = avg(recentGames.map((g) => (g.kills + g.assists) / Math.max(1, g.deaths)));
@@ -1257,12 +1300,13 @@ async function getDashboard(riotFetch, opts) {
     String(opts.count || 20),
   ].join('|');
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < DASHBOARD_TTL_MS) return hit.data;
+  if (hit && Date.now() - hit.at < (hit.ttl || DASHBOARD_TTL_MS)) return hit.data;
   if (inflight.has(key)) return inflight.get(key);
 
   const pending = loadDashboard(riotFetch, opts)
     .then((data) => {
-      cache.set(key, { at: Date.now(), data });
+      const empty = !(data?.recentGames || []).length;
+      cache.set(key, { at: Date.now(), data, ttl: empty ? 20 * 1000 : DASHBOARD_TTL_MS });
       return data;
     })
     .finally(() => {
