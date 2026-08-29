@@ -296,7 +296,7 @@ body.nav-locked { overflow: hidden; }
 .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .muted { color: var(--muted); }
 
-/* —— Home (DPM-style hub) —— */
+/* —— Home hub —— */
 .home {
   position: relative;
   padding-top: 18px;

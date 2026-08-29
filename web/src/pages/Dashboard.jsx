@@ -863,7 +863,7 @@ export default function Dashboard() {
       {!activeId ? (
         <div className="wd-empty">
           <h1>Dashboard</h1>
-          <p className="muted">Link a Riot ID to open your DPM-style overview and match history.</p>
+          <p className="muted">Link a Riot ID to open your overview and match history.</p>
           <button type="button" className="btn btn-violet" onClick={() => navigate('/profile')}>Link profile</button>
         </div>
       ) : loadError ? (
