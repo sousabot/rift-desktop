@@ -14,12 +14,13 @@ import {
   timeAgo,
 } from '../lib';
 import './Leaderboard.css';
+import { ChampionIcon } from '../components/ChampionIcon';
 
 const MODES = [
-  { id: 'soloq', label: 'SoloQ', blurb: 'Ranked Solo/Duo ladder' },
-  { id: 'flex', label: 'Flex', blurb: 'Ranked Flex ladder' },
-  { id: 'otps', label: 'OTPs', blurb: 'One-tricks ranked by SoloQ LP' },
-  { id: 'aram', label: 'ARAM', blurb: 'Howling Abyss ladder' },
+  { id: 'soloq', label: 'SoloQ', blurb: 'Ranked Solo/Duo ladder', champ: 'Fiora' },
+  { id: 'flex', label: 'Flex', blurb: 'Ranked Flex ladder', champ: 'Orianna' },
+  { id: 'otps', label: 'OTPs', blurb: 'One-tricks ranked by SoloQ LP', champ: 'MasterYi' },
+  { id: 'aram', label: 'ARAM', blurb: 'Howling Abyss ladder', champ: 'Braum' },
 ];
 
 const TIERS = [
@@ -366,6 +367,7 @@ export default function Leaderboard() {
             className={`lb-mode-link${mode === row.id ? ' is-on' : ''}`}
             onClick={() => pickMode(row.id)}
           >
+            <ChampionIcon name={row.champ} size={18} title="" />
             {row.label}
           </button>
         ))}

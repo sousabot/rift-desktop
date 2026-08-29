@@ -25,7 +25,11 @@
   padding: 8px 14px;
   border-radius: 10px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
+.lb-mode-link .rift-champ-icon { border-radius: 5px; }
 .lb-mode-link:hover { color: #fff; background: rgba(255, 255, 255, 0.05); }
 .lb-mode-link.is-on {
   color: #fff;

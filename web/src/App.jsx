@@ -54,24 +54,28 @@ const LB_MENU = [
     to: '/leaderboard?mode=soloq&tier=challenger',
     title: 'SoloQ',
     blurb: 'Ranked Solo/Duo ladder from every region.',
+    icon: 'https://ddragon.leagueoflegends.com/cdn/16.16.1/img/champion/Fiora.png',
     ready: true,
   },
   {
     to: '/leaderboard?mode=flex&tier=challenger',
     title: 'Flex',
     blurb: 'Ranked Flex ladder standings by region.',
+    icon: 'https://ddragon.leagueoflegends.com/cdn/16.16.1/img/champion/Orianna.png',
     ready: true,
   },
   {
     to: '/leaderboard?mode=otps',
     title: 'OTPs',
     blurb: 'One-tricks ranked by SoloQ LP.',
+    icon: 'https://ddragon.leagueoflegends.com/cdn/16.16.1/img/champion/MasterYi.png',
     ready: true,
   },
   {
     to: '/leaderboard?mode=aram',
     title: 'ARAM',
     blurb: 'Howling Abyss ladder — on the roadmap.',
+    icon: 'https://ddragon.leagueoflegends.com/cdn/16.16.1/img/champion/Braum.png',
     ready: true,
   },
 ];
@@ -125,7 +129,11 @@ function NavDropdown({ id, label, active, items, open, onToggle, onClose }) {
               className={`nav-dd-item${!item.ready ? ' is-soon' : ''}`}
               onClick={onClose}
             >
-              {item.icon ? <img src={item.icon} alt="" /> : <span className="nav-dd-dot" />}
+              {item.icon
+                ? (typeof item.icon === 'string'
+                  ? <img src={item.icon} alt="" />
+                  : <span className={`nav-dd-icon${item.tone ? ` is-${item.tone}` : ''}`}>{item.icon}</span>)
+                : <span className="nav-dd-dot" />}
               <span>
                 <strong>
                   {item.title}
