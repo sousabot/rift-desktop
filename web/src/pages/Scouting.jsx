@@ -293,8 +293,8 @@ export default function Scouting() {
           <p>
             {updatedLabel(data?.updatedAt)}
             {' · '}
-            {data?.source === 'riot'
-              ? 'Master+ SoloQ ladder by region.'
+            {slim
+              ? 'Master+ SoloQ ladder by region — LP and win rate.'
               : 'Master+ SoloQ by region. Click a metric to sort.'}
           </p>
         </div>
@@ -312,6 +312,7 @@ export default function Scouting() {
       </header>
 
       <div className="sc-tools">
+        {slim ? null : (
         <div className="sc-lanes" role="group" aria-label="Lane filter">
           {LANES.map((row) => (
             <button
@@ -326,6 +327,7 @@ export default function Scouting() {
             </button>
           ))}
         </div>
+        )}
 
         <select
           value={platform}
@@ -364,15 +366,13 @@ export default function Scouting() {
         {region}
         {' · '}
         {nearestLp > 0 ? `${nearestLp.toLocaleString()} LP+` : 'All LP'}
-        {' · '}
-        {laneLabel}
+        {slim ? null : ` · ${laneLabel}`}
         {' · '}
         Sorted by {sortLabel}
         {dir === 'asc' ? ' (low first)' : ''}
       </p>
 
       {error ? <div className="note is-error">{error}</div> : null}
-      {!error && data?.note ? <div className="note">{data.note}</div> : null}
 
       {loading && !hasRows ? (
         <div className="sc-table-wrap">
