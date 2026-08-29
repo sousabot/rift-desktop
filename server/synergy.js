@@ -1,5 +1,7 @@
 /** Duo synergy tier list — DPM.lol duo + solo baselines (same source as dpm.lol/synergy). */
 
+const fs = require('fs');
+const path = require('path');
 const cloudscraper = require('cloudscraper');
 const { publicError, blockedError } = require('./safe-error');
 
@@ -56,6 +58,50 @@ const MIN_GAMES_BY_TIER = {
 const cache = new Map();
 const inflight = new Map();
 let nameCache = null;
+let bundledFallback = null;
+
+function loadBundledFallback() {
+  if (bundledFallback) return bundledFallback;
+  try {
+    bundledFallback = JSON.parse(fs.readFileSync(path.join(__dirname, 'synergy-fallback.json'), 'utf8'));
+  } catch {
+    bundledFallback = { payloads: {}, pairings: [] };
+  }
+  return bundledFallback;
+}
+
+function snapshotPayload(type, plat, tier, tf) {
+  const data = loadBundledFallback();
+  const keys = [
+    `${type}|${plat}|${tier}|${tf}`,
+    `${type}|${plat}|${tier}|30days`,
+    `${type}|${plat}|master|30days`,
+    `${type}|euw1|${tier}|30days`,
+    `${type}|euw1|master|30days`,
+  ];
+  for (const key of keys) {
+    const hit = data.payloads?.[key];
+    if (hit?.rows?.length) {
+      return {
+        ok: true,
+        source: 'snapshot',
+        duoType: hit.duoType || type,
+        role1: hit.role1,
+        role2: hit.role2,
+        platform: plat,
+        rank: tier,
+        timeframe: tf,
+        minGames: hit.minGames,
+        total: hit.total,
+        analysed: hit.analysed,
+        patch: hit.patch,
+        rows: hit.rows,
+        pairings: data.pairings?.length ? data.pairings : hit.pairings,
+      };
+    }
+  }
+  return null;
+}
 
 function resolveDuoType(role1, role2, duoType) {
   const raw = String(duoType || '').toUpperCase();
@@ -243,16 +289,23 @@ async function getSynergy({
     };
     cache.set(key, { at: Date.now(), data: payload });
     return payload;
-  })().catch((err) => ({
-    ok: false,
-    error: publicError(err, 'Could not load synergy list.'),
-    rows: [],
-    pairings: Object.entries(DUO_TYPES).map(([id, r]) => ({
-      id,
-      role1: r.role1,
-      role2: r.role2,
-    })),
-  })).finally(() => inflight.delete(key));
+  })().catch((err) => {
+    const snap = snapshotPayload(type, plat, tier, tf);
+    if (snap) {
+      cache.set(key, { at: Date.now(), data: snap });
+      return snap;
+    }
+    return {
+      ok: false,
+      error: publicError(err, 'Could not load synergy list.'),
+      rows: [],
+      pairings: Object.entries(DUO_TYPES).map(([id, r]) => ({
+        id,
+        role1: r.role1,
+        role2: r.role2,
+      })),
+    };
+  }).finally(() => inflight.delete(key));
 
   inflight.set(key, job);
   return job;
