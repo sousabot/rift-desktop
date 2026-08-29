@@ -2,9 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useSession } from '../state/SessionContext';
 import { useI18n } from '../i18n/LocaleContext';
+import { version as APP_VERSION } from '../../package.json';
 import './FeedbackForm.css';
 
-const FALLBACK_VERSION = '0.1.0';
+const FALLBACK_VERSION = APP_VERSION;
 
 export default function FeedbackForm({ open, onClose }) {
   const { session } = useSession();

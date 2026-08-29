@@ -7,9 +7,10 @@ import { usePremium } from '../state/PremiumContext';
 import { useI18n } from '../i18n/LocaleContext';
 import FeedbackForm from './FeedbackForm';
 import LOGO from '../assets/logo-mark.png';
+import { version as APP_VERSION } from '../../package.json';
 import './TitleBar.css';
 
-const FALLBACK_VERSION = '0.1.0';
+const FALLBACK_VERSION = APP_VERSION;
 const hasWindowApi = typeof window !== 'undefined' && !!window.windowControls;
 
 function IconBack() {

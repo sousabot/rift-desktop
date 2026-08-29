@@ -54,10 +54,25 @@ function broadcastPinned(comp) {
 
 module.exports = function registerTftComps(ipcMain) {
   cacheDir();
-  const { getTftComps } = require('../server/tft-comps');
+  let getTftComps = null;
+  try {
+    getTftComps = require('../server/tft-comps').getTftComps;
+  } catch (err) {
+    console.error('[tft] server/tft-comps.js is not in this build:', err?.message || err);
+  }
 
   handle(ipcMain, 'tft:comps', async (_e, args = {}) => {
     try {
+      if (typeof getTftComps !== 'function') {
+        return {
+          builtAt: Date.now(),
+          clusterId: null,
+          tftSet: '',
+          source: 'metatft',
+          comps: [],
+          error: 'TFT comps are missing from this install. Update to the latest Setup build.',
+        };
+      }
       return await getTftComps(args || {});
     } catch (err) {
       return {

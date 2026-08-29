@@ -116,7 +116,7 @@ export default function Roadmap() {
           </div>
           <div className="rm-stat">
             <em>Windows app</em>
-            <strong>v0.1.21</strong>
+            <strong>v0.1.22</strong>
             <span>{APP_LIVE.length} live tools</span>
           </div>
           <div className="rm-stat is-next">

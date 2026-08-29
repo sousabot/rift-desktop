@@ -1,6 +1,6 @@
 {
   "name": "rift-desktop",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "description": "Rift.lol desktop app — League stats dashboard",
   "author": {
     "name": "Rift.lol"
@@ -54,8 +54,7 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "server/premium.js",
-      "server/gift-store.js",
+      "server/**/*.js",
       "package.json"
     ],
     "asarUnpack": [
