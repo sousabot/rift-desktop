@@ -262,6 +262,9 @@ body.nav-locked { overflow: hidden; }
   border-color: rgba(255, 92, 104, 0.28);
   background: rgba(255, 92, 104, 0.1);
   color: #ffb0b6;
+  overflow: hidden;
+  max-height: 5.5em;
+  word-break: break-word;
 }
 .note.is-ok {
   border-color: rgba(62, 207, 142, 0.28);

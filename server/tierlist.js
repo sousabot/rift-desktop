@@ -78,22 +78,111 @@ function metaScoreOf(row) {
   return (16 - tier) * 1000 - rank + (row.winrate || 0) * 0.01;
 }
 
+function blockedError(cause) {
+  const err = new Error('Could not load the tier list. Try again in a moment.');
+  err.status = 403;
+  err.cause = cause;
+  return err;
+}
+
 async function fetchJson(url) {
-  const body = await cloudscraper.get({
-    uri: url,
-    headers: {
-      Accept: 'application/json',
-      Origin: 'https://dpm.lol',
-      Referer: 'https://dpm.lol/tierlist',
-    },
-  });
-  const text = String(body || '');
-  if (text.trimStart().startsWith('<')) {
-    const err = new Error('tierlist blocked');
-    err.status = 403;
-    throw err;
+  let body;
+  try {
+    body = await cloudscraper.get({
+      uri: url,
+      headers: {
+        Accept: 'application/json',
+        Origin: 'https://dpm.lol',
+        Referer: 'https://dpm.lol/tierlist',
+      },
+    });
+  } catch (err) {
+    throw blockedError(err);
   }
-  return JSON.parse(text);
+  const text = String(body || '');
+  if (text.trimStart().startsWith('<')) throw blockedError();
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw blockedError(err);
+  }
+}
+
+const LOL_LANES = [
+  ['top', 'Top'],
+  ['jungle', 'Jungle'],
+  ['middle', 'Mid'],
+  ['bottom', 'ADC'],
+  ['support', 'Support'],
+];
+
+const LOL_HEADERS = {
+  accept: 'application/json',
+  origin: 'https://lolalytics.com',
+  referer: 'https://lolalytics.com/',
+  'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+};
+
+async function fetchLolalyticsLane(lane, tier) {
+  const q = new URLSearchParams({ ep: 'list', queue: '420', lane, tier });
+  const res = await fetch(`https://a1.lolalytics.com/mega/?${q}`, { headers: LOL_HEADERS });
+  if (!res.ok) throw new Error(`lolalytics ${res.status}`);
+  return res.json();
+}
+
+async function fetchTierListLolalytics({ platform, rank, names }) {
+  const plat = String(platform || 'euw1').toLowerCase();
+  const tier = String(rank || 'master').toLowerCase();
+  const payloads = await Promise.all(LOL_LANES.map(([lane]) => fetchLolalyticsLane(lane, tier)));
+  const rows = [];
+  LOL_LANES.forEach(([, role], i) => {
+    const cid = payloads[i]?.cid || {};
+    for (const [id, entry] of Object.entries(cid)) {
+      const champion = names.byId?.[String(id)];
+      if (!champion) continue;
+      const games = Number(entry.games) || 0;
+      if (games <= 0) continue;
+      rows.push({
+        champion,
+        role,
+        games,
+        winrate: Number(entry.wr) || 0,
+        pickrate: Number(entry.pr) || 0,
+        banrate: Number(entry.br) || 0,
+        lanePct: 100,
+        isPrimary: true,
+        tier: '?',
+        tierNum: 0,
+        delta: 0,
+        pbi: 0,
+        roleRank: Number(entry.rank) || 9999,
+        score: Number(entry.wr) || 0,
+        tierScore: 0,
+        lowSample: games < 30,
+      });
+    }
+  });
+  assignRoleTiers(rows);
+  assignGlobalRank(rows);
+  const wrSum = rows.reduce((s, r) => s + (r.winrate || 0) * (r.games || 0), 0);
+  const gameSum = rows.reduce((s, r) => s + (r.games || 0), 0);
+  const patch = names.version
+    ? String(names.version).split('.').slice(0, 2).join('.')
+    : 'live';
+  return {
+    platform: plat,
+    rank: tier,
+    region: plat,
+    patch,
+    timeframe: DEFAULT_TIMEFRAME,
+    matches: gameSum,
+    analysed: gameSum,
+    avgWr: gameSum > 0 ? wrSum / gameSum : null,
+    reliable: rows.length,
+    builtAt: Date.now(),
+    source: 'lolalytics',
+    rows,
+  };
 }
 
 async function loadChampionNames() {
@@ -230,32 +319,38 @@ async function fetchTierList({
   const tier = String(rank || 'master').toLowerCase();
   const tf = String(timeframe || DEFAULT_TIMEFRAME).toLowerCase();
   const names = await loadChampionNames();
-  const q = new URLSearchParams({ platform: plat, tier, timeframe: tf });
-  const raw = await fetchJson(`https://dpm.lol/v1/tierlist?${q.toString()}`);
-  const rows = rowsFromDpm(raw?.champions, names);
-  assignGlobalRank(rows);
-
-  const wrSum = rows.reduce((s, r) => s + (r.winrate || 0) * (r.games || 0), 0);
-  const gameSum = rows.reduce((s, r) => s + (r.games || 0), 0);
-  const avgWr = gameSum > 0 ? wrSum / gameSum : null;
-  const patch = names.version
-    ? String(names.version).split('.').slice(0, 2).join('.')
-    : 'live';
-
-  return {
-    platform: plat,
-    rank: tier,
-    region: plat,
-    patch,
-    timeframe: tf,
-    matches: Number(raw?.total) || rows.length,
-    analysed: Number(raw?.total) || rows.length,
-    avgWr,
-    reliable: rows.length,
-    builtAt: Date.now(),
-    source: 'dpm',
-    rows,
-  };
+  try {
+    const q = new URLSearchParams({ platform: plat, tier, timeframe: tf });
+    const raw = await fetchJson(`https://dpm.lol/v1/tierlist?${q.toString()}`);
+    const rows = rowsFromDpm(raw?.champions, names);
+    assignGlobalRank(rows);
+    const wrSum = rows.reduce((s, r) => s + (r.winrate || 0) * (r.games || 0), 0);
+    const gameSum = rows.reduce((s, r) => s + (r.games || 0), 0);
+    const avgWr = gameSum > 0 ? wrSum / gameSum : null;
+    const patch = names.version
+      ? String(names.version).split('.').slice(0, 2).join('.')
+      : 'live';
+    return {
+      platform: plat,
+      rank: tier,
+      region: plat,
+      patch,
+      timeframe: tf,
+      matches: Number(raw?.total) || rows.length,
+      analysed: Number(raw?.total) || rows.length,
+      avgWr,
+      reliable: rows.length,
+      builtAt: Date.now(),
+      source: 'dpm',
+      rows,
+    };
+  } catch (err) {
+    try {
+      const fallback = await fetchTierListLolalytics({ platform: plat, rank: tier, names });
+      if (fallback.rows.length >= 20) return fallback;
+    } catch { /* keep original */ }
+    throw blockedError(err);
+  }
 }
 
 async function getTierList({
@@ -281,7 +376,9 @@ async function getTierList({
       writeAll(next);
       return data;
     } catch (err) {
-      if (cached?.data?.rows?.length) return { ...cached.data, stale: true, error: err.message };
+      if (cached?.data?.rows?.length) {
+        return { ...cached.data, stale: true, error: 'Could not refresh the tier list.' };
+      }
       throw err;
     }
   })().finally(() => inflight.delete(key));

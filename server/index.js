@@ -72,6 +72,14 @@ function readJson(req) {
   });
 }
 
+function publicError(err, fallback = 'Request failed. Try again in a moment.') {
+  const raw = String(err?.message || err || '');
+  if (!raw.trim()) return fallback;
+  if (/<!doctype|<html|just a moment|cloudflare|cf-chl|cf_chl|403\s*-/i.test(raw)) return fallback;
+  if (raw.length > 180) return fallback;
+  return raw;
+}
+
 function send(res, status, body) {
   const json = JSON.stringify(body);
   res.writeHead(status, {
@@ -236,7 +244,7 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, data);
     } catch (err) {
       const status = err.status && err.status >= 400 && err.status < 600 ? err.status : 500;
-      send(res, status, { error: err.message || 'Request failed' });
+      send(res, status, { error: publicError(err, 'Request failed. Try again in a moment.') });
     }
     return;
   }
@@ -329,7 +337,7 @@ const server = http.createServer(async (req, res) => {
     send(res, 404, { error: 'Not found' });
   } catch (err) {
     console.log(`[rift-api] ${req.method} ${url.pathname} -> ${err.status || 500}`);
-    send(res, err.status || 500, { error: err.message || 'Server error' });
+    send(res, err.status || 500, { error: publicError(err, 'Server error') });
   }
 });
 
