@@ -1,5 +1,7 @@
 /** Public Data Studio proxy — same DPM.lol studio feed as the desktop app. */
 
+const fs = require('fs');
+const path = require('path');
 const cloudscraper = require('cloudscraper');
 const { publicError, blockedError } = require('./safe-error');
 
@@ -50,6 +52,52 @@ const QUEUE_MAP = {
 
 const cache = new Map();
 const inflight = new Map();
+let bundledFallback = null;
+
+function loadBundledFallback() {
+  if (bundledFallback) return bundledFallback;
+  try {
+    bundledFallback = JSON.parse(fs.readFileSync(path.join(__dirname, 'studio-fallback.json'), 'utf8'));
+  } catch {
+    bundledFallback = { icons: [], rankDist: {}, at: null };
+  }
+  return bundledFallback;
+}
+
+function snapshotFor(view, platform, queue) {
+  const data = loadBundledFallback();
+  if (view === 'icons' && data.icons?.length) {
+    return {
+      view: 'icons',
+      rows: data.icons,
+      groups: null,
+      max: null,
+      totalPlayers: null,
+      totalMatches: null,
+      updatedAt: data.at || null,
+      source: 'snapshot',
+    };
+  }
+  if (view === 'rank-dist') {
+    const raw = data.rankDist?.[platform]?.[queue]
+      || data.rankDist?.[platform]?.soloq
+      || data.rankDist?.euw1?.soloq;
+    if (!raw) return null;
+    return {
+      view: 'rank-dist',
+      platform: raw.platform || String(platform || 'euw1').toUpperCase(),
+      queue,
+      rows: normalizeRows(raw),
+      groups: null,
+      max: null,
+      totalPlayers: raw.totalPlayers ?? null,
+      totalMatches: raw.totalMatches ?? null,
+      updatedAt: raw.updatedAt || data.at || null,
+      source: 'snapshot',
+    };
+  }
+  return null;
+}
 
 function resolveEndpoint(view, dimension = 'champion') {
   const base = VIEW_PATH[view];
@@ -173,7 +221,27 @@ async function loadView(args = {}) {
       url = `${BASE}/${endpoint}?${params.toString()}`;
     }
 
-    const raw = await fetchJson(url);
+    let raw;
+    try {
+      raw = await fetchJson(url);
+    } catch (err) {
+      const snap = snapshotFor(view, platform, queue);
+      if (snap) {
+        const payload = {
+          ...snap,
+          dimension,
+          platform: snap.platform || platform.toUpperCase(),
+          queue,
+          tier,
+          timeframe,
+          lane,
+          refreshing: false,
+        };
+        cache.set(key, { at: Date.now(), data: payload });
+        return payload;
+      }
+      throw err;
+    }
     const rows = normalizeRows(raw);
     const payload = {
       view,
