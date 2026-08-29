@@ -207,6 +207,8 @@
   min-width: 1080px;
   font-size: 13px;
 }
+.sc-table.is-slim { min-width: 0; }
+.sc-table.is-slim { min-width: 0; }
 .sc-table th,
 .sc-table td {
   padding: 9px 12px;

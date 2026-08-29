@@ -274,7 +274,7 @@ export default function Scouting() {
     goldDiffAt15: 'gold@15', csDiffAt15: 'CS@15', killParticipation: 'KP%',
     firstbloodRate: 'first blood', visionScorePerMinute: 'vision/m',
     csm: 'CS/m', dmgm: 'damage/m', dmggold: 'damage/gold', uniqueChampions: 'pool',
-  }[sort] || sort;
+  }[slim ? (data?.sort || 'lp') : sort] || sort;
 
   const pickSort = (id) => {
     if (sort === id) setDir((d) => (d === 'desc' ? 'asc' : 'desc'));
@@ -404,7 +404,7 @@ export default function Scouting() {
 
       {hasRows ? (
         <div className={`sc-table-wrap${reloading ? ' is-reloading' : ''}`}>
-          <table className="sc-table">
+          <table className={`sc-table${slim ? ' is-slim' : ''}`}>
             <thead>
               <tr>
                 <th className="is-rank">#</th>
