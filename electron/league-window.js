@@ -8,20 +8,30 @@ let latest = null;
 let stopping = false;
 let restartTimer = null;
 
+function kindLabel(n) {
+  if (n === 2) return 'tft';
+  if (n === 1) return 'lol';
+  return null;
+}
+
 function parseLine(line) {
   const parts = String(line || '').trim().split(/\s+/).map(Number);
-  if (parts.length < 6 || parts.some((n) => !Number.isFinite(n))) return null;
-  const [left, top, right, bottom, focused, running] = parts;
+  // left top right bottom kind focused running
+  if (parts.length < 7 || parts.some((n) => !Number.isFinite(n))) return null;
+  const [left, top, right, bottom, kind, focused, running] = parts;
   const width = right - left;
   const height = bottom - top;
+  const hasRect = width >= 200 && height >= 200;
   return {
     x: left,
     y: top,
     width,
     height,
-    focused: focused === 1,
+    focused: focused === 1 || focused === 2,
+    focusKind: kindLabel(focused) || (focused ? 'lol' : null),
     running: running === 1,
-    hasRect: width >= 200 && height >= 200,
+    hasRect,
+    kind: hasRect ? kindLabel(kind) : null,
   };
 }
 

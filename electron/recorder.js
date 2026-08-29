@@ -2,6 +2,8 @@ const {
   app,
   BrowserWindow,
   desktopCapturer,
+  dialog,
+  globalShortcut,
   powerSaveBlocker,
   protocol,
   shell,
@@ -9,14 +11,22 @@ const {
 } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 const { Readable } = require('stream');
 const { getRecorderTick } = require('./live-client');
 const store = require('./replays-store');
 const { patchWebmFile, sliceWebmFile } = require('./webm-duration');
-const { makeSeekableMp4, probeDurationSec, startWindowGrab, stopDesktopGrab, cutClip } = require('./ffmpeg-seekable');
+const {
+  makeSeekableMp4,
+  probeDurationSec,
+  startWindowGrab,
+  startDesktopRegionGrab,
+  stopDesktopGrab,
+  cutClip,
+} = require('./ffmpeg-seekable');
 const { getLeagueBounds, startLeagueWatcher, stopLeagueWatcher } = require('./league-window');
 
-const ENABLED = false;
+const ENABLED = true;
 const CLUSTER = Buffer.from([0x1f, 0x43, 0xb6, 0x75]);
 const POLL_MS = 1000;
 const DEBOUNCE_S = 4;
@@ -50,6 +60,7 @@ function idleStatus(extra = {}) {
 }
 
 function finishIdle(extra = {}) {
+  unbindSaveHotkey();
   try { stopLeagueWatcher(); } catch { /* ignore */ }
   broadcast(idleStatus(extra));
 }
@@ -178,8 +189,14 @@ function broadcast(status) {
 
 function getStatus() {
   const settings = store.getSettings();
+  const pauseMsg = 'Replays are paused until capture is fixed.';
+  let error = lastStatus.error;
+  // Drop the old kill-switch banner once capture is re-enabled.
+  if (ENABLED && error === pauseMsg) error = null;
   return {
     ...lastStatus,
+    disabled: !ENABLED,
+    error,
     recording: !!session,
     paused: !!session?.paused,
     finalizing: stopping && !!session,
@@ -209,11 +226,13 @@ function sessionId() {
 
 function ensureRecorderWindow() {
   if (recWin && !recWin.isDestroyed()) return recWin;
+  // Park off-screen. Never use { forward: true } here — on Windows that
+  // subclass flickers the system cursor for every mouse move while capture runs.
   recWin = new BrowserWindow({
     width: 72,
     height: 72,
-    x: 0,
-    y: 0,
+    x: -12000,
+    y: -12000,
     show: false,
     skipTaskbar: true,
     frame: false,
@@ -229,7 +248,7 @@ function ensureRecorderWindow() {
       backgroundThrottling: false,
     },
   });
-  recWin.setIgnoreMouseEvents(true, { forward: true });
+  recWin.setIgnoreMouseEvents(true);
   recWin.setMenuBarVisibility(false);
   recWin.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(permission === 'media' || permission === 'display-capture' || permission === 'clipboard-read');
@@ -316,11 +335,27 @@ async function captureSize() {
 }
 
 function isGameWindowName(name) {
-  const n = String(name || '');
+  const n = String(name || '').trim();
   if (/Riot Client/i.test(n)) return false;
   if (/League of Legends \(TM\) Client/i.test(n)) return true;
   if (/League of Legends \(TM\)/i.test(n)) return true;
+  // TFT (Unreal) window title is usually just "TFT".
+  if (/^TFT\b/i.test(n)) return true;
+  if (/Teamfight Tactics/i.test(n)) return true;
   return false;
+}
+
+function isTftSourceName(name) {
+  const n = String(name || '').trim();
+  return /^TFT\b/i.test(n) || /Teamfight Tactics/i.test(n);
+}
+
+function inferGameMode(tick = {}, sourceName = '') {
+  const fromTick = String(tick.gameMode || '').trim();
+  if (fromTick) return fromTick;
+  if (isTftSourceName(sourceName)) return 'TFT';
+  if (/League of Legends/i.test(sourceName)) return 'CLASSIC';
+  return '';
 }
 
 async function waitForLeagueCrop(ms = 1800) {
@@ -482,20 +517,45 @@ function videoTimeSec() {
   return Math.max(0, (Date.now() - session.startedAt - (session.pausedMs || 0) - extra) / 1000);
 }
 
-function noteFocus(focused) {
-  if (!session || !session.seenFocused) return;
-  if (!focused) {
-    if (!session.pauseAt) session.pauseAt = Date.now();
-    return;
+function setFfmpegSuspended(proc, suspend) {
+  if (!proc?.pid || process.platform !== 'win32') return;
+  if (!!proc.__riftSuspended === !!suspend) return;
+  proc.__riftSuspended = !!suspend;
+  const fn = suspend ? 'NtSuspendProcess' : 'NtResumeProcess';
+  try {
+    spawn('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class RiftNt{[DllImport("ntdll.dll")]public static extern int NtSuspendProcess(IntPtr p);[DllImport("ntdll.dll")]public static extern int NtResumeProcess(IntPtr p);[DllImport("kernel32.dll")]public static extern IntPtr OpenProcess(uint a,bool b,int pid);[DllImport("kernel32.dll")]public static extern bool CloseHandle(IntPtr h);public static void Go(int pid,bool s){var h=OpenProcess(0x0800,false,pid);if(h==IntPtr.Zero)return;if(s)NtSuspendProcess(h);else NtResumeProcess(h);CloseHandle(h);}}'; [RiftNt]::Go(${proc.pid}, $${suspend ? 'true' : 'false'})`,
+    ], { windowsHide: true, stdio: 'ignore' });
+  } catch {
+    proc.__riftSuspended = !suspend;
   }
-  if (session.pauseAt) {
-    session.pausedMs = (session.pausedMs || 0) + (Date.now() - session.pauseAt);
-    session.pauseAt = 0;
-  }
+}
+
+function noteFocus(_focused) {
+  // Keep recording through alt-tab; do not pause or suspend capture.
+}
+
+function noteTimeline(ev) {
+  if (!session) return;
+  if (!Array.isArray(session.timeline)) session.timeline = [];
+  const id = String(ev?.id ?? '');
+  if (id && session.timeline.some((row) => String(row.id) === id)) return;
+  session.timeline.push({
+    id: id || `e-${Date.now().toString(36)}`,
+    type: ev.type || 'event',
+    label: ev.label || 'Event',
+    at: videoTimeSec(),
+    gameTime: Number(ev.time) || session.gameTime || 0,
+  });
+  persistSession({ timeline: session.timeline });
 }
 
 function queueClip(ev) {
   if (!session || !store.getSettings().clipKills) return;
+  if (ev?.type === 'death') return; // timeline marker only
   const t = videoTimeSec();
   const settings = store.getSettings();
   if (session.pending && t - session.pending.lastTime < DEBOUNCE_S) {
@@ -550,6 +610,71 @@ function writeClip(pending) {
   persistSession({ clips: session.clips });
 }
 
+function saveMomentNow(label = 'Manual') {
+  if (!session) return { ok: false, error: 'Not recording' };
+  const settings = store.getSettings();
+  const t = videoTimeSec();
+  writeClip({
+    start: Math.max(0, t - settings.preSeconds),
+    end: t + settings.postSeconds,
+    lastTime: t,
+    gameTime: session.gameTime || t,
+    label,
+    types: ['manual'],
+  });
+  broadcast({ recording: true, clips: session.clips?.length || 0 });
+  return { ok: true };
+}
+
+function bindSaveHotkey() {
+  try { globalShortcut.unregister('F10'); } catch { /* ignore */ }
+  try {
+    globalShortcut.register('F10', () => {
+      if (!session) return;
+      saveMomentNow('Manual');
+    });
+  } catch { /* ignore */ }
+}
+
+function unbindSaveHotkey() {
+  try { globalShortcut.unregister('F10'); } catch { /* ignore */ }
+}
+
+function folderBytes(dir) {
+  let total = 0;
+  const stack = [dir];
+  while (stack.length) {
+    const cur = stack.pop();
+    let entries = [];
+    try { entries = fs.readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+    for (const ent of entries) {
+      const full = path.join(cur, ent.name);
+      if (ent.isDirectory()) stack.push(full);
+      else {
+        try { total += fs.statSync(full).size; } catch { /* ignore */ }
+      }
+    }
+  }
+  return total;
+}
+
+function diskInfo() {
+  const root = store.rootDir();
+  const used = folderBytes(root);
+  let free = 0;
+  let total = 0;
+  try {
+    if (typeof fs.statfsSync === 'function') {
+      const s = fs.statfsSync(root);
+      const bsize = Number(s.bsize) || 4096;
+      free = Number(s.bavail) * bsize;
+      total = Number(s.blocks) * bsize;
+    }
+  } catch { /* ignore */ }
+  if (!total) total = used + free;
+  return { used, free, total, root };
+}
+
 function persistSession(patch = {}) {
   if (!session) return;
   store.upsertMatch({
@@ -566,6 +691,7 @@ function persistSession(patch = {}) {
     warning: session.warning || null,
     error: session.error || null,
     clips: session.clips,
+    timeline: session.timeline || [],
     segments: session.segments || [],
     container: session.container || null,
     ...patch,
@@ -583,34 +709,78 @@ function friendlyCaptureError(err) {
 
 async function startFfmpegFallback(current) {
   const outPath = path.join(current.dir, 'match.mp4');
-  const proc = startWindowGrab({
-    outPath,
-    title: 'League of Legends (TM) Client',
-  });
-  let stderr = '';
-  proc.stderr?.on('data', (d) => { stderr += String(d); });
-  current.ffmpegProc = proc;
-  current.matchFile = 'match.mp4';
-  current.container = 'mp4';
-  current.sourceName = 'League of Legends (TM) Client';
-  const t0 = Date.now();
-  while (Date.now() - t0 < 6000) {
-    if (proc.exitCode != null) {
-      throw new Error(stderr.trim() || 'ffmpeg capture exited before it wrote a file.');
+  const attempts = [];
+
+  try {
+    const bounds = await getLeagueBounds();
+    if (bounds?.hasRect && bounds.width >= 320 && bounds.height >= 180) {
+      attempts.push({
+        kind: 'region',
+        label: current.sourceName || 'game region',
+        start: () => startDesktopRegionGrab({
+          outPath,
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+        }),
+      });
     }
-    if (fileSize(outPath) > 4000) break;
-    await new Promise((r) => setTimeout(r, 200));
+  } catch { /* title fallbacks below */ }
+
+  const titles = [
+    current.sourceName,
+    'League of Legends (TM) Client',
+    'TFT',
+    'TFT  ',
+  ].filter((t, i, arr) => t && arr.indexOf(t) === i);
+  for (const title of titles) {
+    attempts.push({
+      kind: 'title',
+      label: title,
+      start: () => startWindowGrab({ outPath, title }),
+    });
   }
-  if (fileSize(outPath) < 2000) {
+
+  let lastErr = '';
+  for (const attempt of attempts) {
+    const proc = attempt.start();
+    let stderr = '';
+    proc.stderr?.on('data', (d) => { stderr += String(d); });
+    current.ffmpegProc = proc;
+    current.matchFile = 'match.mp4';
+    current.container = 'mp4';
+    current.sourceName = attempt.label;
+    current.viaFfmpegRegion = attempt.kind === 'region';
+    const t0 = Date.now();
+    let ok = false;
+    while (Date.now() - t0 < 6000) {
+      if (proc.exitCode != null) {
+        lastErr = stderr.trim() || `ffmpeg could not grab "${attempt.label}".`;
+        break;
+      }
+      if (fileSize(outPath) > 4000) {
+        ok = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    if (ok) {
+      current.ready = true;
+      current.error = null;
+      current.viaFfmpeg = true;
+      current.warning = attempt.kind === 'region'
+        ? `Recording ${attempt.label}. Capture keeps running if you alt-tab.`
+        : `Recording ${attempt.label}. Capture keeps running if you alt-tab.`;
+      persistSession({ matchFile: current.matchFile, container: 'mp4', warning: current.warning });
+      return;
+    }
     try { await stopDesktopGrab(proc); } catch { /* ignore */ }
     current.ffmpegProc = null;
-    throw new Error(stderr.trim() || 'ffmpeg did not start capturing the League region.');
+    current.viaFfmpegRegion = false;
+    try { if (fs.existsSync(outPath)) fs.unlinkSync(outPath); } catch { /* ignore */ }
   }
-  current.ready = true;
-  current.error = null;
-  current.viaFfmpeg = true;
-  current.warning = 'Recording League of Legends (TM) Client only. Alt-tab pauses so your desktop is not in the clip.';
-  persistSession({ matchFile: current.matchFile, container: 'mp4', warning: current.warning });
+  throw new Error(lastErr || 'ffmpeg did not start capturing the League/TFT window.');
 }
 
 async function startSession(tick = {}, { manual } = {}) {
@@ -628,7 +798,7 @@ async function startSession(tick = {}, { manual } = {}) {
   }
   if (!source) {
     broadcast({
-      error: 'Waiting for League of Legends (TM) Client. Load into a game in borderless or windowed mode — exclusive fullscreen and the launcher cannot be captured.',
+      error: 'Waiting for the League or TFT game window. Load into a match in borderless / windowed fullscreen — exclusive fullscreen and the Riot launcher cannot be captured.',
     });
     return getStatus();
   }
@@ -645,16 +815,17 @@ async function startSession(tick = {}, { manual } = {}) {
     startedAt: Date.now(),
     endedAt: null,
     you: tick.you || '',
-    champion: tick.champion || '',
-    gameMode: tick.gameMode || '',
+    champion: tick.champion || (isTftSourceName(source.name) ? 'TFT' : ''),
+    gameMode: inferGameMode(tick, source.name),
     gameTime: tick.gameTime || 0,
     sourceName: source.name,
-    warning: 'Recording League of Legends (TM) Client. Borderless or windowed works; exclusive fullscreen often cannot be captured.',
+    warning: 'Recording the game window. Borderless / windowed fullscreen works; exclusive fullscreen often cannot be captured.',
     error: null,
     init: null,
     container: null,
     chunks: [],
     clips: [],
+    timeline: [],
     segments: [],
     lastSegAt: Date.now(),
     seen: new Set(),
@@ -679,7 +850,7 @@ async function startSession(tick = {}, { manual } = {}) {
 
   broadcast({
     recording: false,
-    warning: 'Starting League window capture…',
+    warning: 'Starting game window capture…',
     error: null,
     source: source.name,
   });
@@ -727,6 +898,7 @@ async function startSession(tick = {}, { manual } = {}) {
     error: null,
     warning: session.warning,
   });
+  bindSaveHotkey();
   try {
     const bounds = await getLeagueBounds();
     if (bounds?.focused) {
@@ -817,6 +989,7 @@ async function abortSession(message) {
   const current = session;
   stopping = true;
   resolveReady(new Error(message));
+  try { setFfmpegSuspended(current?.ffmpegProc, false); } catch { /* ignore */ }
   try { await stopDesktopGrab(current?.ffmpegProc); } catch { /* ignore */ }
   try { await stopRecorderPage(); } catch { /* ignore */ }
   session = null;
@@ -842,6 +1015,7 @@ async function stopSession() {
   resolveReady(new Error('Recording stopped'));
   const current = session;
   flushPending();
+  try { setFfmpegSuspended(current.ffmpegProc, false); } catch { /* ignore */ }
   try { await stopDesktopGrab(current.ffmpegProc); } catch { /* ignore */ }
   current.ffmpegProc = null;
   await stopRecorderPage();
@@ -952,6 +1126,7 @@ async function stopSession() {
     warning: current.warning,
     error: current.error,
     clips: current.clips,
+    timeline: current.timeline || [],
     segments: current.segments || [],
     container: current.container || null,
   });
@@ -999,9 +1174,9 @@ function handleTick(tick, leagueOpen, leagueFocused) {
   if (tick.inGame) offGameStreak = 0;
   else if (session && !session.manual) offGameStreak += 1;
 
-  if (!session && tick.inGame) {
+  if (!session && (tick.inGame || leagueOpen)) {
     if (!store.getSettings().autoRecord) {
-      broadcast({ inGame: true, gameTime: tick.gameTime || 0 });
+      broadcast({ inGame: !!tick.inGame, gameTime: tick.gameTime || 0 });
       return;
     }
     if (Date.now() - lastStartAttempt < 1500) return;
@@ -1014,17 +1189,12 @@ function handleTick(tick, leagueOpen, leagueFocused) {
     return;
   }
 
-  sendRecorder('recorder:focus', session.seenFocused ? leagueFocused : true);
+  sendRecorder('recorder:focus', true);
   if (leagueFocused) session.seenFocused = true;
   noteFocus(leagueFocused && session.seenFocused);
-  if (!session.seenFocused || leagueFocused) {
-    session.paused = false;
-    if (session.warning && session.warning.startsWith('Paused')) {
-      session.warning = 'Recording League of Legends (TM) Client.';
-    }
-  } else {
-    session.paused = true;
-    session.warning = 'Paused — League is not focused. Alt-tab back to the game to keep recording.';
+  session.paused = false;
+  if (session.warning && session.warning.startsWith('Paused')) {
+    session.warning = 'Recording the game window.';
   }
 
   if (leagueOpen) {
@@ -1043,6 +1213,7 @@ function handleTick(tick, leagueOpen, leagueFocused) {
     for (const ev of tick.events || []) {
       if (session.seen.has(ev.id)) continue;
       session.seen.add(ev.id);
+      noteTimeline(ev);
       queueClip(ev);
     }
     persistSession({
@@ -1077,17 +1248,15 @@ function startPolling() {
   pollTimer = setInterval(async () => {
     let leagueOpen = false;
     let leagueFocused = false;
-    if (session) {
-      try {
-        const bounds = await getLeagueBounds();
-        leagueOpen = !!(bounds?.running || bounds?.hasRect);
-        leagueFocused = !!bounds?.focused;
-        if (!leagueOpen) {
-          try { leagueOpen = await leagueGameOpen(); } catch { /* ignore */ }
-        }
-      } catch {
-        try { leagueOpen = await leagueGameOpen(); } catch { leagueOpen = false; }
+    try {
+      const bounds = await getLeagueBounds();
+      leagueOpen = !!(bounds?.running || bounds?.hasRect);
+      leagueFocused = !!bounds?.focused;
+      if (!leagueOpen) {
+        try { leagueOpen = await leagueGameOpen(); } catch { /* ignore */ }
       }
+    } catch {
+      try { leagueOpen = await leagueGameOpen(); } catch { leagueOpen = false; }
     }
     try {
       const tick = await getRecorderTick();
@@ -1276,6 +1445,23 @@ function register(ipcMain) {
       url: `gdreplay://local/${id}/seek.webm?v=${Date.now()}`,
       start: Number(sliced.start) || startSec,
     };
+  });
+  ipcMain.handle('replays:diskInfo', () => diskInfo());
+  ipcMain.handle('replays:saveMoment', () => saveMomentNow('Manual'));
+  ipcMain.handle('replays:exportExcerpt', async (_e, { id, rel, start, duration, suggestName }) => {
+    const full = store.safeJoin(id, rel);
+    if (!fs.existsSync(full)) return { ok: false, error: 'File missing' };
+    const win = BrowserWindow.getFocusedWindow();
+    const result = await dialog.showSaveDialog(win || undefined, {
+      title: 'Export excerpt',
+      defaultPath: suggestName || `rift-excerpt-${Date.now()}.mp4`,
+      filters: [{ name: 'MP4', extensions: ['mp4'] }],
+    });
+    if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+    await cutClip(full, result.filePath, start, duration);
+    let bytes = 0;
+    try { bytes = fs.statSync(result.filePath).size; } catch { /* ignore */ }
+    return { ok: true, path: result.filePath, bytes };
   });
 
   app.on('before-quit', (e) => {

@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { getCareerSidebar, getDashboard, getLiveGame } from '../api';
+import { getCareerSidebar, getDashboard, getLiveGame, lookupPro } from '../api';
 import { useSession } from '../session';
 import {
   champIconUrl,
   ddragonVersion,
   deriveDashboardExtras,
+  formatMmr,
   getRuneIndex,
   itemIconUrl,
   parseRiotIdInput,
@@ -19,6 +20,16 @@ import {
   summonerIconUrl,
 } from '../lib';
 import MatchExpand from './MatchExpand';
+import {
+  CollectionsCard,
+  HourHeatmap,
+  InsightsCard,
+  LensCard,
+  LpChart,
+  PhaseCard,
+  ProChip,
+  StatGrid,
+} from './DashboardInsights';
 import './Dashboard.css';
 
 const MODE_KEYS = ['All', 'Solo', 'Flex', 'Aram', 'Normal'];
@@ -123,8 +134,172 @@ function ChampImg({ name, size = 36, version }) {
       width={size}
       height={size}
       className="wd-champ"
-      onError={(e) => { e.currentTarget.src = champIconUrl('Aatrox', version); }}
+      onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
     />
+  );
+}
+
+function wrTone(wr) {
+  if (wr >= 60) return 'is-hot';
+  if (wr >= 50) return 'is-up';
+  return 'is-down';
+}
+
+function ChampionPoolPanel({
+  pool = [],
+  gamesCount,
+  mode,
+  version,
+  onMode,
+}) {
+  const [sort, setSort] = useState({ key: 'games', dir: 'desc' });
+
+  const rows = useMemo(() => {
+    const pick = (row) => {
+      if (sort.key === 'champion') return String(row.champion || '').toLowerCase();
+      if (sort.key === 'kda') return Number(row.kda) || 0;
+      if (sort.key === 'cs') return Number(row.cs) || 0;
+      if (sort.key === 'wr') return Number(row.wr) || 0;
+      if (sort.key === 'record') return Number(row.wins) || 0;
+      return Number(row.games) || 0;
+    };
+    return [...pool].sort((a, b) => {
+      const av = pick(a);
+      const bv = pick(b);
+      if (typeof av === 'string') {
+        const d = av.localeCompare(bv);
+        return sort.dir === 'asc' ? d : -d;
+      }
+      const d = sort.dir === 'asc' ? av - bv : bv - av;
+      return d || (b.games - a.games);
+    });
+  }, [pool, sort]);
+
+  const maxGames = Math.max(...pool.map((r) => Number(r.games) || 0), 1);
+  const highlights = useMemo(() => {
+    if (!pool.length) return [];
+    const byGames = [...pool].sort((a, b) => b.games - a.games)[0];
+    const sample = pool.filter((r) => r.games >= 2);
+    const ranked = sample.length ? sample : pool;
+    const byWr = [...ranked].sort((a, b) => b.wr - a.wr || b.games - a.games)[0];
+    const byKda = [...ranked].sort((a, b) => Number(b.kda) - Number(a.kda) || b.games - a.games)[0];
+    const min2 = sample.length > 0 && sample.length < pool.length;
+    return [
+      { id: 'played', sortKey: 'games', label: 'Most played', row: byGames, value: `${byGames.games} games` },
+      { id: 'wr', sortKey: 'wr', label: min2 ? 'Best WR · 2+ games' : 'Best win rate', row: byWr, value: `${byWr.wr}% · ${byWr.games}g` },
+      { id: 'kda', sortKey: 'kda', label: min2 ? 'Best KDA · 2+ games' : 'Best KDA', row: byKda, value: `${byKda.kda} KDA` },
+    ];
+  }, [pool]);
+
+  const toggle = (key) => {
+    setSort((prev) => {
+      if (prev.key !== key) return { key, dir: key === 'champion' ? 'asc' : 'desc' };
+      return { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' };
+    });
+  };
+
+  const Th = ({ id, label, num }) => (
+    <button
+      type="button"
+      className={`wd-cp-th${num ? ' is-num' : ''}${sort.key === id ? ' is-on' : ''}`}
+      onClick={() => toggle(id)}
+    >
+      {label}
+      <i>{sort.key === id && sort.dir === 'asc' ? '▲' : '▼'}</i>
+    </button>
+  );
+
+  const champWord = pool.length === 1 ? 'champion' : 'champions';
+
+  return (
+    <section className="wd-cp card">
+      <header className="wd-cp-head">
+        <div>
+          <h2>Champion performance</h2>
+          <span className="muted">
+            {pool.length} {champWord} from last {gamesCount || 0} {mode} games
+          </span>
+        </div>
+        <div className="wd-mode-filters" role="group" aria-label="Queue">
+          {MODE_KEYS.map((m) => (
+            <button
+              key={m}
+              type="button"
+              className={mode === m ? 'is-on' : ''}
+              onClick={() => onMode(m)}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {highlights.length ? (
+        <div className="wd-cp-tiles">
+          {highlights.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              className={`wd-cp-tile${sort.key === h.sortKey ? ' is-on' : ''}`}
+              onClick={() => setSort({ key: h.sortKey, dir: 'desc' })}
+            >
+              <ChampImg name={h.row.champion} size={40} version={version} />
+              <div>
+                <em>{h.label}</em>
+                <strong>{h.row.champion}</strong>
+                <span>{h.value}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="wd-cp-table">
+        <div className="wd-cp-row wd-cp-row--head">
+          <Th id="champion" label="Champion" />
+          <Th id="games" label="Games" num />
+          <Th id="wr" label="Win rate" num />
+          <Th id="record" label="W–L" num />
+          <Th id="kda" label="KDA" num />
+          <Th id="cs" label="CS/M" num />
+        </div>
+        {rows.map((row) => {
+          const wr = Number(row.wr) || 0;
+          const games = Number(row.games) || 0;
+          return (
+            <Link
+              key={row.champion}
+              className="wd-cp-row"
+              to={`/tierlist/${encodeURIComponent(row.champion)}`}
+            >
+              <span className="wd-cp-champ">
+                <ChampImg name={row.champion} size={32} version={version} />
+                <strong>{row.champion}</strong>
+              </span>
+              <span className="wd-cp-games">
+                <b>{games}</b>
+                <span className="wd-cp-bar">
+                  <i style={{ width: `${Math.max(8, Math.round((games / maxGames) * 100))}%` }} />
+                </span>
+              </span>
+              <span className={`wd-cp-wr ${wrTone(wr)}`}>
+                <b>{wr}%</b>
+                <span className="wd-cp-bar is-wr">
+                  <i style={{ width: `${Math.max(4, wr)}%` }} />
+                </span>
+              </span>
+              <span className="wd-cp-record">{row.wins}W <em>–</em> {row.losses}L</span>
+              <span className="wd-cp-kda">
+                <b>{row.kda}</b>
+                <em>{row.kills} / {row.deaths} / {row.assists}</em>
+              </span>
+              <span className="wd-cp-cs">{row.cs}</span>
+            </Link>
+          );
+        })}
+        {!rows.length ? <p className="muted wd-cp-empty">No champion data for this queue.</p> : null}
+      </div>
+    </section>
   );
 }
 
@@ -161,13 +336,24 @@ function truncateName(name, max = 14) {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }
 
-function RolePerformanceCard({ rows, career, careerGames, loading, error }) {
+function RolePerformanceCard({
+  rows, career, careerGames, loading, error, recentGames,
+}) {
+  const scope = (
+    <SideScopeNote
+      career={career}
+      careerGames={careerGames}
+      loading={loading}
+      error={error}
+      recentGames={recentGames}
+    />
+  );
   if (!rows?.length) {
     return (
       <article className="wd-side-card">
         <header>
           <h3>Role Performance</h3>
-          <SideScopeNote career={career} careerGames={careerGames} loading={loading} error={error} />
+          {scope}
         </header>
         <p className="muted" style={{ padding: '4px 0 0' }}>
           {loading ? 'Loading career roles…' : 'No role data yet.'}
@@ -179,7 +365,7 @@ function RolePerformanceCard({ rows, career, careerGames, loading, error }) {
     <article className="wd-side-card">
       <header>
         <h3>Role Performance</h3>
-        <SideScopeNote career={career} careerGames={careerGames} loading={loading} error={error} />
+        {scope}
       </header>
       <div className="wd-role-table-head">
         <span>Role</span>
@@ -202,13 +388,24 @@ function RolePerformanceCard({ rows, career, careerGames, loading, error }) {
   );
 }
 
-function PlayedWithCard({ rows, version, career, careerGames, loading, error }) {
+function PlayedWithCard({
+  rows, version, career, careerGames, loading, error, recentGames,
+}) {
+  const scope = (
+    <SideScopeNote
+      career={career}
+      careerGames={careerGames}
+      loading={loading}
+      error={error}
+      recentGames={recentGames}
+    />
+  );
   if (!rows?.length) {
     return (
       <article className="wd-side-card">
         <header>
           <h3>Played With</h3>
-          <SideScopeNote career={career} careerGames={careerGames} loading={loading} error={error} />
+          {scope}
         </header>
         <p className="muted" style={{ padding: '4px 0 0' }}>
           {loading ? 'Loading teammates…' : 'No frequent teammates yet.'}
@@ -220,7 +417,7 @@ function PlayedWithCard({ rows, version, career, careerGames, loading, error }) 
     <article className="wd-side-card">
       <header>
         <h3>Played With</h3>
-        <SideScopeNote career={career} careerGames={careerGames} loading={loading} error={error} />
+        {scope}
       </header>
       <div className="wd-played-list">
         {rows.map((row) => (
@@ -250,16 +447,20 @@ const TOTAL_PING_KEYS = [
   { key: 'allIn', label: 'All-In' },
 ];
 
-function SideScopeNote({ career, careerGames, loading, error }) {
-  if (loading) return <span className="wd-side-scope is-loading">Loading career…</span>;
-  if (error) return <span className="wd-side-scope is-error">Career unavailable</span>;
+function SideScopeNote({ career, careerGames, loading, error, recentGames }) {
   if (career && careerGames) {
     return <span className="wd-side-scope">Career · all queues · {careerGames} games</span>;
   }
-  return <span className="wd-side-scope">Career · all time</span>;
+  // Until the career scan lands we are showing the dashboard's last-N sample.
+  const fallback = recentGames ? `Last ${recentGames} games` : 'Recent games';
+  if (loading) return <span className="wd-side-scope is-loading">{fallback} · widening…</span>;
+  if (error) return <span className="wd-side-scope is-error">{fallback} · career unavailable</span>;
+  return <span className="wd-side-scope">{fallback}</span>;
 }
 
-function TotalPingsCard({ totalPings, career, careerGames, loading, error }) {
+function TotalPingsCard({
+  totalPings, career, careerGames, loading, error, recentGames,
+}) {
   const totals = totalPings?.totals || {};
   const averages = totalPings?.averages || {};
   return (
@@ -271,6 +472,7 @@ function TotalPingsCard({ totalPings, career, careerGames, loading, error }) {
           careerGames={careerGames}
           loading={loading}
           error={error}
+          recentGames={recentGames}
         />
       </header>
       <div className="wd-pings-grid">
@@ -321,6 +523,11 @@ function RankCard({ title, ranked, ladderRank, sparkData }) {
         <div>
           <strong style={{ color }}>{ranked?.rank || 'Unranked'}</strong>
           <span>{ranked?.lp != null ? `${ranked.lp} LP` : '—'}</span>
+          {ranked?.estMmr != null ? (
+            <em className="wd-rank-mmr" title="Estimated matchmaking rating">
+              ~{formatMmr(ranked.estMmr)} MMR
+            </em>
+          ) : null}
         </div>
       </div>
       {ranked?.wins != null ? (
@@ -438,6 +645,7 @@ export default function Dashboard() {
 
   const qName = searchParams.get('name') || '';
   const qTag = searchParams.get('tag') || '';
+  const qPlatform = (searchParams.get('platform') || '').toLowerCase();
   const ownId = session ? `${session.gameName}#${session.tagLine}` : '';
   const activeId = (qName && qTag ? `${qName}#${qTag}` : ownId).trim();
   const viewingOther = Boolean(qName && qTag && (!ownId || activeId.toLowerCase() !== ownId.toLowerCase()));
@@ -450,6 +658,7 @@ export default function Dashboard() {
   const [tab, setTab] = useState('overview');
   const [expandedId, setExpandedId] = useState(null);
   const [liveGame, setLiveGame] = useState(null);
+  const [proIdentity, setProIdentity] = useState(null);
   const [query, setQuery] = useState(activeId);
   const [careerLoading, setCareerLoading] = useState(false);
   const [careerError, setCareerError] = useState(false);
@@ -463,7 +672,7 @@ export default function Dashboard() {
   useEffect(() => { setQuery(activeId); }, [activeId]);
 
   const lookup = {
-    platform: session?.platform || 'euw1',
+    platform: qPlatform || session?.platform || 'euw1',
     region: session?.region || '',
   };
 
@@ -510,7 +719,7 @@ export default function Dashboard() {
   useEffect(() => {
     load(activeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, session?.platform, session?.region]);
+  }, [activeId, lookup.platform, session?.region]);
 
   // Career Role / Played With / Pings — delayed so match history can finish first.
   useEffect(() => {
@@ -591,6 +800,19 @@ export default function Dashboard() {
     return () => { cancelled = true; clearInterval(id); };
   }, [profile?.riotId, profile?.platform, lookup.platform, lookup.region]);
 
+  // Pro identity badge — silent no-op for the vast majority of accounts.
+  useEffect(() => {
+    setProIdentity(null);
+    if (!profile?.riotId) return undefined;
+    let cancelled = false;
+    lookupPro(profile.riotId)
+      .then((res) => {
+        if (!cancelled && res?.ok && res.identity) setProIdentity(res.identity);
+      })
+      .catch(() => { /* not a pro, or directory offline */ });
+    return () => { cancelled = true; };
+  }, [profile?.riotId]);
+
   const onSearch = (e) => {
     e.preventDefault();
     const parsed = parseRiotIdInput(query);
@@ -615,9 +837,11 @@ export default function Dashboard() {
   const topChamps = pool.slice(0, 3);
   const inLive = !!(liveGame && (liveGame.blue?.length || liveGame.red?.length));
   const sideExtras = useMemo(() => deriveDashboardExtras(profile), [profile]);
+  const allGames = profile?.recentGames || [];
+  const mainRole = sideExtras.rolePerformance?.[0]?.roleKey || null;
 
   return (
-    <div className="wd-page">
+    <div className={`wd-page${loading && profile ? ' is-reloading' : ''}`}>
       <header className="wd-head">
         <form className="wd-search" onSubmit={onSearch}>
           <input
@@ -647,7 +871,7 @@ export default function Dashboard() {
           <p>{loadError}</p>
           <button type="button" className="btn btn-violet" onClick={() => load(activeId)}>Retry</button>
         </div>
-      ) : loading || !profile ? (
+      ) : !profile ? (
         <div className="wd-empty">
           <div className="wd-spinner" />
           <p className="muted">Loading summoner data…</p>
@@ -675,6 +899,7 @@ export default function Dashboard() {
                 <div className="wd-profile-meta">
                   <span>{profile.region || platformShort(profile.platform)}</span>
                   {inLive ? <span className="wd-live-pill">Live now</span> : null}
+                  <ProChip identity={proIdentity} />
                   <span className="muted">Last {overview.games || 0} games · {mode}</span>
                 </div>
               </div>
@@ -729,32 +954,13 @@ export default function Dashboard() {
           ) : null}
 
           {tab === 'champions' ? (
-            <section className="wd-champ-table card">
-              <header>
-                <h2>Champion performance</h2>
-                <span className="muted">From last {overview.games || 0} {mode} games</span>
-              </header>
-              <div className="wd-champ-table-head">
-                <span>Champion</span>
-                <span>KDA</span>
-                <span>CS/M</span>
-                <span>Games</span>
-                <span>WR</span>
-              </div>
-              {pool.map((row) => (
-                <div key={row.champion} className="wd-champ-table-row">
-                  <div className="wd-champ-name">
-                    <ChampImg name={row.champion} size={28} version={version} />
-                    <span>{row.champion}</span>
-                  </div>
-                  <span>{row.kda}</span>
-                  <span>{row.cs}</span>
-                  <span>{row.games}</span>
-                  <span className={row.wr >= 50 ? 'is-up' : 'is-down'}>{row.wr}%</span>
-                </div>
-              ))}
-              {!pool.length ? <p className="muted">No champion data for this queue.</p> : null}
-            </section>
+            <ChampionPoolPanel
+              pool={pool}
+              gamesCount={overview.games}
+              mode={mode}
+              version={version}
+              onMode={selectMode}
+            />
           ) : null}
 
           {tab === 'overview' ? (
@@ -799,11 +1005,14 @@ export default function Dashboard() {
                     <div key={row.champion} className="wd-champ-mini-row">
                       <div>
                         <ChampImg name={row.champion} size={24} version={version} />
-                        <span>{row.games}</span>
+                        <span>
+                          <strong>{row.champion}</strong>
+                          <em>{row.games}g</em>
+                        </span>
                       </div>
                       <span>{row.kda}</span>
                       <span>{row.cs}</span>
-                      <span className={row.wr >= 50 ? 'is-up' : 'is-down'}>{row.wr}%</span>
+                      <span className={wrTone(row.wr)}>{row.wr}%</span>
                     </div>
                   ))}
                   {!pool.length ? <p className="muted" style={{ padding: '8px 0 0' }}>No games in this queue.</p> : null}
@@ -816,7 +1025,10 @@ export default function Dashboard() {
                   careerGames={profile.careerGames}
                   loading={careerLoading}
                   error={careerError}
+                  recentGames={overview.games}
                 />
+                <PhaseCard games={allGames} />
+                <LensCard lens={profile.lens} />
                 <PlayedWithCard
                   rows={sideExtras.playedWith}
                   version={version}
@@ -824,6 +1036,7 @@ export default function Dashboard() {
                   careerGames={profile.careerGames}
                   loading={careerLoading}
                   error={careerError}
+                  recentGames={overview.games}
                 />
                 <TotalPingsCard
                   totalPings={sideExtras.totalPings}
@@ -831,7 +1044,9 @@ export default function Dashboard() {
                   careerGames={profile.careerGames}
                   loading={careerLoading}
                   error={careerError}
+                  recentGames={overview.games}
                 />
+                <CollectionsCard collections={profile.collections} />
               </aside>
 
               <section className="wd-main">
@@ -871,6 +1086,29 @@ export default function Dashboard() {
                     </div>
                   </div>
                 </article>
+
+                <StatGrid
+                  stats={profile.stats}
+                  sparklines={profile.sparklines}
+                  games={overview.games}
+                />
+
+                <LpChart
+                  history={profile.lpHistory}
+                  lpDelta30d={profile.solo?.lpDelta30d}
+                  estMmr={profile.solo?.estMmr ?? profile.estMmr}
+                />
+
+                <div className="wd-insight-row">
+                  <InsightsCard
+                    stats={profile.stats}
+                    overview={overview}
+                    lens={profile.lens}
+                    mainRole={mainRole}
+                    mode={mode}
+                  />
+                  <HourHeatmap games={allGames} />
+                </div>
 
                 <div className="wd-filters">
                   <div className="wd-role-filters">

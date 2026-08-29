@@ -3,6 +3,7 @@ import {
   champIconUrl,
   champPortraitUrls,
   getChampionIndex,
+  resolveChampDdragonId,
   itemIconUrl,
   runeIconUrl,
   spellIconUrl,
@@ -16,10 +17,20 @@ export function ChampionIcon({ name, size = 36, className = '', title }) {
   const version = useDdragonVersion();
   const [src, setSrc] = useState(() => champIconUrl(name, version));
   const [failed, setFailed] = useState(false);
+
   useEffect(() => {
-    setSrc(champIconUrl(name, version));
+    let alive = true;
     setFailed(false);
+    setSrc(champIconUrl(name, version));
+    // Resolve via live champion.json so aliases (Wukong, Bel'Veth, …) always hit the right id.
+    getChampionIndex().then((index) => {
+      if (!alive) return;
+      const id = resolveChampDdragonId(name, index);
+      if (id) setSrc(`https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${id}.png`);
+    });
+    return () => { alive = false; };
   }, [name, version]);
+
   if (failed) {
     return (
       <span
@@ -37,12 +48,13 @@ export function ChampionIcon({ name, size = 36, className = '', title }) {
       className={`rift-champ-icon ${className}`.trim()}
       style={{ width: size, height: size }}
       onError={() => {
-        const fallback = champIconUrl('Aatrox', version);
-        if (src === fallback) {
-          setFailed(true);
+        // Retry once with slug map only; never silently swap to another champion.
+        const retry = champIconUrl(name, version);
+        if (src !== retry) {
+          setSrc(retry);
           return;
         }
-        setSrc(fallback);
+        setFailed(true);
       }}
     />
   );

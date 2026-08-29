@@ -223,7 +223,9 @@ async function redeemCheckoutSession({ sessionId, deviceId }) {
   }
   const plan = session.metadata?.plan || 'six';
   const boundDevice = session.metadata?.deviceId || session.client_reference_id || '';
-  if (boundDevice && deviceId && boundDevice !== deviceId) {
+  // Website checkout uses a temporary web-* id — allow the desktop app to claim it.
+  const webCheckout = /^web-/i.test(String(boundDevice));
+  if (boundDevice && deviceId && boundDevice !== deviceId && !webCheckout) {
     const err = new Error('This payment is bound to another install. Open Rift.lol on the PC that started checkout.');
     err.status = 403;
     throw err;
@@ -249,18 +251,39 @@ function successHtml(sessionId) {
   const safe = String(sessionId || '').replace(/[<>&"']/g, '');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Rift.lol Premium</title>
+<title>Rift.lol Premium — activate in the app</title>
 <style>
-  body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:Segoe UI,system-ui,sans-serif;
+  body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;font-family:Segoe UI,system-ui,sans-serif;
   background:#0b0e16;color:#eceefb}
-  .card{max-width:420px;padding:28px;border-radius:16px;background:#12121b;border:1px solid rgba(255,180,84,.35)}
-  h1{margin:0 0 8px;font-size:22px} p{color:#8890b5;line-height:1.45}
-  code{display:block;margin-top:14px;padding:10px;border-radius:10px;background:#0b0e16;word-break:break-all;font-size:12px;color:#ffb454}
+  .card{max-width:480px;padding:28px;border-radius:16px;background:#12121b;border:1px solid rgba(255,180,84,.35)}
+  h1{margin:0 0 8px;font-size:22px} p{color:#8890b5;line-height:1.5;margin:0 0 12px}
+  ol{margin:0 0 16px;padding-left:1.2rem;color:#c8cde6;line-height:1.55}
+  li{margin:0 0 6px}
+  code{display:block;margin:12px 0 16px;padding:12px;border-radius:10px;background:#0b0e16;word-break:break-all;font-size:12px;color:#ffb454;user-select:all}
+  .btn{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 18px;border-radius:999px;
+    background:linear-gradient(180deg,#ffc56e,#ffb454);color:#1a1206;font-weight:700;text-decoration:none}
+  .hint{font-size:13px;color:#6b7394}
 </style></head><body><div class="card">
   <h1>Payment received</h1>
-  <p>Return to the Rift.lol app → Premium → <strong>Verify payment</strong>. If asked, paste this session id:</p>
-  <code>${safe || '(missing session id)'}</code>
-</div></body></html>`;
+  <p>Premium is paid — unlock it inside the Windows app:</p>
+  <ol>
+    <li>Install / open <strong>Rift.lol</strong> on this PC</li>
+    <li>Go to <strong>Premium</strong> in the sidebar</li>
+    <li>Paste the session id below → tap <strong>Verify payment</strong></li>
+  </ol>
+  <code id="sid">${safe || '(missing session id)'}</code>
+  <p class="hint">Keep this tab until Premium shows as active in the app.</p>
+  <a class="btn" href="https://sousabot.github.io/rift-desktop/#/get-app?section=download">Download the app</a>
+</div>
+<script>
+  try {
+    const el = document.getElementById('sid');
+    if (el && el.textContent && !el.textContent.startsWith('(')) {
+      navigator.clipboard.writeText(el.textContent.trim()).catch(() => {});
+    }
+  } catch (_) {}
+</script>
+</body></html>`;
 }
 
 function cancelHtml() {

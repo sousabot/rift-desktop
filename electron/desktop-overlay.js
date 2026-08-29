@@ -11,6 +11,8 @@ let lastTarget = null;
 let followTimer = null;
 let lastPos = '';
 let attached = false;
+/** 'lol' | 'tft' | null — from the game window we pinned to. */
+let gameKind = null;
 let lastVideo = null;
 let unfocusedSince = 0;
 /** User enabled overlay in settings — window is created lazily when League is running. */
@@ -32,11 +34,21 @@ function setWindowReadyListener(fn) {
   onWindowReady = typeof fn === 'function' ? fn : null;
 }
 
-function setAttachedState(next) {
+function emitAttach() {
+  const payload = { attached, kind: gameKind };
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    try { overlayWindow.webContents.send('overlay:attached', payload); } catch { /* ignore */ }
+  }
+  try { onAttachChange?.(payload); } catch { /* ignore */ }
+}
+
+function setAttachedState(next, kind = null) {
   const v = !!next;
-  if (attached === v) return;
+  const nextKind = v ? (kind || gameKind || null) : null;
+  if (attached === v && gameKind === nextKind) return;
   attached = v;
-  try { onAttachChange?.(attached); } catch { /* ignore */ }
+  gameKind = nextKind;
+  emitAttach();
 }
 
 function sendVideo(video) {
@@ -72,6 +84,9 @@ function applyClickThrough() {
     overlayWindow.setIgnoreMouseEvents(false);
     return;
   }
+  // Never use { forward: true } on Windows — it subclasses mouse input and
+  // flickers the system cursor continuously while the overlay is up.
+  // Interact with panels via Ctrl+B (edit mode) instead.
   overlayWindow.setIgnoreMouseEvents(true);
 }
 
@@ -96,6 +111,7 @@ function getPanels() {
     skill: { ...panels.skill },
     winprob: { ...panels.winprob },
     scout: { ...panels.scout },
+    tftComp: { ...panels.tftComp },
   };
 }
 
@@ -113,6 +129,7 @@ function clampPanelsToSize(width, height) {
     skill: clamp(cur.skill),
     winprob: clamp(cur.winprob),
     scout: clamp(cur.scout),
+    tftComp: clamp(cur.tftComp),
   };
   if (
     next.bench.x === cur.bench.x && next.bench.y === cur.bench.y
@@ -122,6 +139,7 @@ function clampPanelsToSize(width, height) {
     && next.skill.x === cur.skill.x && next.skill.y === cur.skill.y
     && next.winprob.x === cur.winprob.x && next.winprob.y === cur.winprob.y
     && next.scout.x === cur.scout.x && next.scout.y === cur.scout.y
+    && next.tftComp.x === cur.tftComp.x && next.tftComp.y === cur.tftComp.y
   ) {
     return cur;
   }
@@ -203,12 +221,9 @@ function destroyOverlaySurface() {
 
 /** Tear down the GPU layer while keeping overlay armed — cursor goes back to normal. */
 function hideOverlay() {
-  setAttachedState(false);
+  setAttachedState(false, null);
   lastPos = '';
   onTopApplied = false;
-  if (overlayWindow && !overlayWindow.isDestroyed()) {
-    try { overlayWindow.webContents.send('overlay:attached', false); } catch { /* ignore */ }
-  }
   destroyOverlaySurface();
 }
 
@@ -304,7 +319,7 @@ function pinToLeague(bounds) {
   const dip = (hasGame && leagueDipRect(bounds)) || lastLeagueDip;
   if (!dip) return;
 
-  // Only spin up Chromium once a live League window exists — not on "Show overlay" click.
+  // Only spin up Chromium once a live League/TFT window exists — not on "Show overlay" click.
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     if (!hasGame) return;
     ensureOverlayWindow();
@@ -312,8 +327,10 @@ function pinToLeague(bounds) {
   }
 
   lastTarget = hasGame ? bounds : lastTarget;
-  setAttachedState(hasGame);
-  try { overlayWindow.webContents.send('overlay:attached', attached); } catch { /* ignore */ }
+  const nextKind = hasGame
+    ? (bounds?.kind === 'tft' || bounds?.focusKind === 'tft' ? 'tft' : (bounds?.kind || 'lol'))
+    : null;
+  setAttachedState(hasGame, nextKind);
 
   if (!overlayWindow.isVisible()) {
     applyClickThrough();
@@ -397,7 +414,13 @@ function getClickThrough() {
 function setIgnoreMouse(ignore) {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   if (editing) return;
-  if (ignore) resetInputState();
+  // Ignore "claim mouse" requests from the renderer — toggling ignoreMouseEvents
+  // while click-through is on is what makes the cursor flicker on Windows.
+  if (ignore || clickThrough) {
+    applyClickThrough();
+    return;
+  }
+  overlayWindow.setIgnoreMouseEvents(false);
 }
 
 module.exports = {
@@ -412,7 +435,8 @@ module.exports = {
   getPanels,
   setPanels,
   setPanel,
-  isAttached: () => attached,
+  isAttached: () => ({ attached, kind: gameKind }),
+  getGameKind: () => gameKind,
   setAttachListener,
   setWindowReadyListener,
   getLastVideo: () => lastVideo,

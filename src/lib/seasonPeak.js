@@ -119,12 +119,13 @@ async function fetchLobbyMmrs({ region, puuid, flex = false }) {
 
 async function fetchOpggContext({ puuid, platform, flex = false, riotId } = {}) {
   const region = regionOf(platform);
+  // Prefer riot_id lookup — OP.GG often 404s on Riot PUUIDs used as path ids.
   const urls = [];
-  if (puuid) {
-    urls.push(`https://lol-api-summoner.op.gg/api/v3/${region}/summoners/${encodeURIComponent(puuid)}?hl=en_US`);
-  }
   if (riotId) {
     urls.push(`https://lol-api-summoner.op.gg/api/v3/${region}/summoners?riot_id=${encodeURIComponent(riotId)}&hl=en_US`);
+  }
+  if (puuid) {
+    urls.push(`https://lol-api-summoner.op.gg/api/v3/${region}/summoners/${encodeURIComponent(puuid)}?hl=en_US`);
   }
 
   for (const url of urls) {

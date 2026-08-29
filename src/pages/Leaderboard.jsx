@@ -58,14 +58,7 @@ function ChampThumb({ name, size = 28 }) {
       title={name}
       className="lb-champ"
       loading="lazy"
-      onError={() => {
-        const fallback = champIconUrl('Aatrox', version);
-        if (src === fallback) {
-          setFailed(true);
-          return;
-        }
-        setSrc(fallback);
-      }}
+      onError={() => setFailed(true)}
       style={{ width: size, height: size }}
     />
   );

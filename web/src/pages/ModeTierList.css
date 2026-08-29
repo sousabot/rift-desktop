@@ -1,0 +1,431 @@
+/* —— Shared Arena / ARAM tier list. Accent comes from --mt-accent per mode. —— */
+
+.mt-page {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  --mt-line: rgba(255, 255, 255, 0.07);
+  --mt-accent: var(--violet);
+  --mt-glow-a: rgba(124, 92, 255, 0.16);
+  --mt-glow-b: rgba(90, 140, 255, 0.12);
+  --mt-focus: rgba(124, 92, 255, 0.55);
+  --mt-focus-ring: rgba(124, 92, 255, 0.14);
+}
+.mt-page.is-arena {
+  --mt-accent: #6ec8ff;
+  --mt-glow-a: rgba(110, 200, 255, 0.16);
+  --mt-glow-b: rgba(90, 140, 255, 0.12);
+  --mt-focus: rgba(110, 200, 255, 0.55);
+  --mt-focus-ring: rgba(110, 200, 255, 0.12);
+}
+.mt-page.is-aram {
+  --mt-accent: var(--gold);
+  --mt-glow-a: rgba(255, 140, 66, 0.16);
+  --mt-glow-b: rgba(124, 92, 255, 0.12);
+  --mt-focus: rgba(255, 180, 84, 0.5);
+  --mt-focus-ring: rgba(255, 180, 84, 0.12);
+}
+
+.mt-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px 28px;
+  align-items: end;
+  margin: 4px 0 0;
+  padding: 18px 20px 20px;
+  border-radius: 18px;
+  border: 1px solid var(--mt-line);
+  background:
+    radial-gradient(520px 180px at 10% -20%, var(--mt-glow-a), transparent 60%),
+    radial-gradient(420px 160px at 90% 0%, var(--mt-glow-b), transparent 55%),
+    linear-gradient(180deg, rgba(18, 22, 34, 0.95), rgba(11, 14, 22, 0.88));
+}
+.mt-kicker {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mt-accent);
+}
+.mt-hero-copy h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: clamp(28px, 4vw, 38px);
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+}
+.mt-hero-copy p:last-child {
+  margin: 10px 0 0;
+  max-width: 50ch;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.mt-hero-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.mt-stat {
+  min-width: 128px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--mt-line);
+  background: rgba(8, 10, 16, 0.55);
+}
+.mt-stat em {
+  display: block;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mt-stat strong {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--display);
+  font-size: 24px;
+  letter-spacing: -0.03em;
+}
+.mt-stat.is-soft strong { font-size: 15px; letter-spacing: -0.02em; }
+.mt-stat.is-soft strong span {
+  margin-left: 6px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.mt-stat > span {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.mt-panel {
+  --mt-cols: 44px minmax(0, 1fr) 60px 150px 78px 118px 118px 82px;
+  border: 1px solid var(--mt-line);
+  border-radius: 18px;
+  background: rgba(14, 18, 28, 0.92);
+  /* clip, not hidden — hidden would make this a scrollport and kill the sticky head. */
+  overflow: clip;
+}
+.mt-panel.no-ban { --mt-cols: 44px minmax(0, 1fr) 60px 150px 78px 118px 82px; }
+
+.mt-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(110px, 150px)) minmax(180px, 1fr);
+  gap: 10px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--mt-line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+}
+.mt-tools label { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.mt-tools label > span {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.mt-tools select,
+.mt-tools input {
+  width: 100%;
+  background: #0b0e16;
+  border: 1px solid var(--mt-line);
+  color: #fff;
+  border-radius: 11px;
+  padding: 9px 11px;
+  font: inherit;
+}
+.mt-tools select:focus,
+.mt-tools input:focus {
+  outline: none;
+  border-color: var(--mt-focus);
+  box-shadow: 0 0 0 3px var(--mt-focus-ring);
+}
+
+/* —— Tier distribution strip —— */
+.mt-dist {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  height: 42px;
+  border-bottom: 1px solid var(--mt-line);
+}
+/* Two lines so even a 30px sliver keeps both its grade and its count. */
+.mt-dist-seg {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 28px;
+  border: 0;
+  border-top: 2px solid var(--tl-c);
+  background: var(--tl-bg);
+  color: var(--tl-c);
+  font-family: var(--mono);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.mt-dist-seg:hover,
+.mt-dist-seg.is-on { background: var(--tl-bg-strong); }
+.mt-dist-seg span { font-size: 11px; line-height: 1; }
+.mt-dist-seg em {
+  font-style: normal;
+  font-size: 9.5px;
+  line-height: 1;
+  color: var(--text);
+  opacity: 0.5;
+}
+
+/* —— Table —— */
+.mt-table { padding: 0; }
+.mt-tr,
+.mt-band {
+  display: grid;
+  grid-template-columns: var(--mt-cols);
+  gap: 10px;
+  align-items: center;
+  padding: 0 16px;
+}
+.mt-tr--head {
+  /* Parks under the sticky global topnav rather than behind it. */
+  position: sticky;
+  top: 58px;
+  z-index: 2;
+  height: 38px;
+  background: rgba(12, 15, 24, 0.96);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--mt-line);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mt-th {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.mt-th.is-num { justify-content: flex-end; }
+.mt-th:hover { color: var(--text); }
+.mt-th.is-on { color: #fff; }
+.mt-th i { font-style: normal; font-size: 9px; opacity: 0; }
+.mt-th.is-on i { opacity: 1; color: var(--mt-accent); }
+.mt-th:hover i { opacity: 0.5; }
+
+.mt-row {
+  position: relative;
+  height: 46px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  font-size: 13px;
+  color: var(--text);
+}
+.mt-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--mt-accent);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.mt-row:hover { background: rgba(255, 255, 255, 0.035); }
+.mt-row:hover::before { opacity: 1; }
+.mt-row:last-child { border-bottom: 0; }
+
+.mt-rank { font-family: var(--mono); font-size: 12px; color: var(--faint); text-align: right; }
+.mt-champ { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mt-champ img {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.05);
+}
+.mt-champ strong {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mt-tier {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--tl-bd);
+  background: var(--tl-bg);
+  color: var(--tl-c);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+/* Metric cell: value in a fixed gutter so digits line up, bar fills the rest. */
+.mt-metric { display: flex; align-items: center; gap: 7px; }
+.mt-metric-val {
+  flex-shrink: 0;
+  min-width: 50px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.mt-metric-val.is-hot { color: #ffd08a; }
+.mt-metric-val.is-good { color: var(--ok); }
+.mt-metric-val.is-mid { color: var(--text); }
+.mt-metric-val.is-bad { color: #ff8d96; }
+.mt-metric-bar {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.mt-metric-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+/* Tick marking the mode average, so above/below reads without doing the maths. */
+.mt-metric-bar b {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.mt-delta {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+.mt-delta.is-up { color: var(--ok); }
+.mt-delta.is-down { color: var(--danger); }
+.mt-delta.is-flat { color: var(--faint); }
+
+.mt-games { font-family: var(--mono); font-size: 12px; color: var(--muted); text-align: right; }
+
+/* Tier band divider */
+.mt-band {
+  height: 34px;
+  background: rgba(255, 255, 255, 0.022);
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+  grid-template-columns: 44px 1fr;
+}
+.mt-band-chip {
+  justify-self: end;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--tl-c);
+}
+.mt-band-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mt-band-name {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mt-band-line { flex: 1; height: 1px; background: linear-gradient(90deg, var(--tl-bd), transparent); }
+.mt-band-count { font-family: var(--mono); font-size: 11px; color: var(--faint); flex-shrink: 0; }
+
+.mt-panel .note { margin: 12px 14px; }
+
+/* Loading skeleton */
+.mt-skel-row { height: 46px; border-bottom: 1px solid rgba(255, 255, 255, 0.045); pointer-events: none; }
+.mt-skel-champ { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mt-skel {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.05), rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+  background-size: 200% 100%;
+  animation: mtShimmer 1.4s ease-in-out infinite;
+}
+.mt-skel.is-icon { height: 30px; width: 30px; border-radius: 7px; flex-shrink: 0; }
+@keyframes mtShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.mt-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 4px;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.mt-foot b { color: var(--muted); font-weight: 700; }
+.mt-clear {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--mt-accent);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+@media (max-width: 1120px) {
+  .mt-panel { --mt-cols: 40px minmax(0, 1fr) 56px 138px 72px 104px 104px; }
+  .mt-panel.no-ban { --mt-cols: 40px minmax(0, 1fr) 56px 138px 72px 104px; }
+  .mt-band { grid-template-columns: 40px 1fr; }
+  .mt-col-games { display: none; }
+}
+@media (max-width: 920px) {
+  .mt-hero { grid-template-columns: 1fr; }
+  .mt-hero-meta { justify-content: flex-start; }
+  .mt-tools { grid-template-columns: 1fr 1fr; }
+  .mt-search { grid-column: 1 / -1; }
+}
+@media (max-width: 860px) {
+  .mt-panel,
+  .mt-panel.no-ban { --mt-cols: 34px minmax(0, 1fr) 52px 130px 68px; }
+  .mt-band { grid-template-columns: 34px 1fr; }
+  .mt-col-pick,
+  .mt-col-ban { display: none; }
+  .mt-dist-seg em { display: none; }
+}
+@media (max-width: 620px) {
+  .mt-panel,
+  .mt-panel.no-ban { --mt-cols: minmax(0, 1fr) 46px 124px; }
+  .mt-col-rank,
+  .mt-col-delta { display: none; }
+  .mt-band { display: flex; align-items: center; gap: 9px; }
+  .mt-band-meta { flex: 1; }
+  .mt-metric-val { min-width: 46px; }
+}

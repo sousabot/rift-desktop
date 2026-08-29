@@ -1,5 +1,6 @@
 const { createScanner } = require('./spectate-feed');
 const { DEFAULT_PROXY, apiUrl, appToken, useLocalKey } = require('./rift-env');
+const { handle } = require('./ipc-handle');
 const lcu = require('./lcu');
 const SPECTATE_DELAY_SEC = 180;
 const SPECTATE_HOST = {
@@ -179,8 +180,8 @@ function register(ipcMain, { riotFetch }) {
     };
   }
 
-  ipcMain.handle('spectate:list', (_e, args) => list(args || {}));
-  ipcMain.handle('spectate:launch', (_e, args) => launch(args || {}));
+  handle(ipcMain, 'spectate:list', (_e, args) => list(args || {}));
+  handle(ipcMain, 'spectate:launch', (_e, args) => launch(args || {}));
 }
 
 module.exports = { register };

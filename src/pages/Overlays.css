@@ -1,124 +1,72 @@
 .ovp-page {
   min-height: 100%;
-  padding: 28px 32px 48px;
+  padding: 20px 24px 48px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  max-width: 1120px;
+  gap: 28px;
+  max-width: 1180px;
   box-sizing: border-box;
 }
 
-.ovp-kicker {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--rift-violet);
-  margin-bottom: 8px;
-}
-
-.ovp-head h1 {
-  margin: 0 0 10px;
-  font-family: var(--rift-font-display);
-  font-size: 30px;
-  letter-spacing: -0.03em;
-}
-
-.ovp-head p {
-  margin: 0;
-  color: var(--rift-text-muted);
-  max-width: 680px;
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-.ovp-card {
-  background: var(--rift-bg-card);
-  border: 1px solid var(--rift-border);
-  border-radius: 18px;
-  padding: 24px 26px;
+.ovp-control {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.ovp-card--control {
-  gap: 22px;
-}
-
-.ovp-card--preview {
-  padding-bottom: 28px;
-}
-
-.ovp-card--preview .ov-preview {
-  width: 100%;
-  max-width: none;
-}
-
-.ovp-section-head {
+.ovp-control-main {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
 }
 
-.ovp-section-head h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+.ovp-control-main strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 15px;
 }
 
-.ovp-section-head p {
-  margin: 6px 0 0;
-  font-size: 13px;
-  color: var(--rift-text-muted);
-  line-height: 1.5;
-  max-width: 62ch;
-}
-
-.ovp-count {
-  flex: 0 0 auto;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--rift-text-muted);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--rift-border);
-  border-radius: 999px;
-  padding: 6px 12px;
-  white-space: nowrap;
-}
-
-.ovp-control-top {
+.ovp-control-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
+  padding-top: 4px;
 }
 
-.ovp-control-copy h2 {
-  margin: 0 0 12px;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+.ovp-control-row strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.ovp-control-row p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--rift-text-muted);
+  line-height: 1.45;
+  max-width: 56ch;
 }
 
 .ovp-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .ovp-badge {
   display: inline-flex;
   align-items: center;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  padding: 6px 10px;
+  padding: 5px 9px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: var(--rift-text-muted);
@@ -152,19 +100,13 @@
 .ovp-btn {
   border: none;
   border-radius: 12px;
-  padding: 10px 16px;
+  padding: 11px 18px;
   font-weight: 700;
   cursor: pointer;
   background: var(--rift-violet);
   color: #fff;
   flex: 0 0 auto;
   white-space: nowrap;
-}
-
-.ovp-btn--lg {
-  min-width: 148px;
-  padding: 12px 20px;
-  font-size: 14px;
 }
 
 .ovp-btn.is-on {
@@ -177,29 +119,188 @@
   cursor: default;
 }
 
-.ovp-setting-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 16px 18px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--rift-border);
-}
-
-.ovp-setting-copy strong {
-  display: block;
-  font-size: 14px;
-  margin-bottom: 4px;
-}
-
-.ovp-setting-copy p {
+.ovp-warn {
   margin: 0;
+  background: #3a2a12;
+  color: #ffd76b;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ovp-hotkeys {
+  margin: 0;
+  font-size: 12px;
+  color: var(--rift-text-muted);
+}
+
+.ovp-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ovp-section-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ovp-section-ico {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: #c4b5ff;
+  background: rgba(124, 92, 255, 0.14);
+  border: 1px solid rgba(124, 92, 255, 0.28);
+  flex: 0 0 auto;
+}
+
+.ovp-section-ico svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ovp-section-head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.ovp-section-head p {
+  margin: 4px 0 0;
   font-size: 13px;
   color: var(--rift-text-muted);
-  line-height: 1.5;
-  max-width: 54ch;
+  line-height: 1.45;
+  max-width: 62ch;
+}
+
+.ovp-gallery {
+  display: grid;
+  gap: 14px;
+}
+
+.ovp-gallery--overlays {
+  grid-template-columns: 1.35fr 1fr 1fr;
+  grid-template-areas:
+    'hero skill scout'
+    'hero tft  scout';
+}
+
+.ovp-gallery--notify {
+  grid-template-columns: 1fr 1fr 1.15fr;
+  grid-template-areas:
+    'winprob trinket items'
+    'obj     obj     items';
+}
+
+.ovp-tile--id-bench { grid-area: hero; }
+.ovp-tile--id-skill { grid-area: skill; }
+.ovp-tile--id-scout { grid-area: scout; }
+.ovp-tile--id-tftComp { grid-area: tft; }
+.ovp-tile--id-items { grid-area: items; }
+.ovp-tile--id-winprob { grid-area: winprob; }
+.ovp-tile--id-trinket { grid-area: trinket; }
+.ovp-tile--id-obj { grid-area: obj; }
+
+.ovp-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 180px;
+  border-radius: 18px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 90% 70% at 70% 10%, rgba(124, 92, 255, 0.16), transparent 55%),
+    linear-gradient(165deg, #171822 0%, #101018 55%, #0c0d14 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ovp-tile.is-on {
+  border-color: rgba(124, 92, 255, 0.42);
+  box-shadow: 0 0 0 1px rgba(124, 92, 255, 0.12);
+}
+
+.ovp-tile-gear {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.7);
+  display: grid;
+  place-items: center;
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ovp-tile-gear svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ovp-tile-visual {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px 16px 10px;
+  min-height: 140px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ovp-tile-visual--bench { align-items: flex-end; }
+.ovp-tile-visual--items { align-items: center; }
+.ovp-tile-visual--scout {
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 16px 12px 8px;
+}
+.ovp-tile-visual--scout .ov-panel-preview {
+  width: 100%;
+  transform: scale(0.72);
+  transform-origin: top center;
+  max-height: 210px;
+}
+.ovp-tile-visual--scout .ov-scout-preview-fit,
+.ovp-tile-visual--scout .ov-panel-preview--scout > * {
+  width: 100%;
+}
+
+.ovp-tile-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px 14px;
+}
+
+.ovp-tile-copy {
+  min-width: 0;
+}
+
+.ovp-tile-copy h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.ovp-tile-copy p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--rift-text-muted);
 }
 
 .ovp-switch {
@@ -252,135 +353,42 @@
   cursor: default;
 }
 
-.ovp-hotkeys {
-  padding: 14px 18px;
-  border-radius: 14px;
-  background: rgba(124, 92, 255, 0.06);
-  border: 1px solid rgba(124, 92, 255, 0.18);
-}
-
-.ovp-hotkeys h3 {
-  margin: 0 0 8px;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #c4b5ff;
-}
-
-.ovp-hotkeys ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.ovp-hotkeys li {
-  font-size: 13px;
-  color: var(--rift-text-muted);
-  line-height: 1.45;
-  padding-left: 14px;
-  position: relative;
-}
-
-.ovp-hotkeys li::before {
-  content: '•';
-  position: absolute;
-  left: 0;
-  color: #9b87ff;
-}
-
-.ovp-warn {
-  background: #3a2a12;
-  color: #ffd76b;
-  border-radius: 14px;
-  padding: 14px 16px;
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.ovp-panels-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.ovp-panel-toggle {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 16px 18px;
-  min-height: 88px;
-  border-radius: 14px;
-  border: 1px solid var(--rift-border);
-  background: rgba(255, 255, 255, 0.02);
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.ovp-panel-toggle:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.ovp-panel-toggle.is-on {
-  border-color: rgba(124, 92, 255, 0.45);
-  background: rgba(124, 92, 255, 0.08);
-}
-
-.ovp-panel-toggle:has(input:disabled) {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.ovp-panel-toggle input {
-  margin-top: 3px;
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  accent-color: var(--rift-violet);
-}
-
-.ovp-panel-toggle-body {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.ovp-panel-toggle-body strong {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--rift-text);
-  line-height: 1.25;
-}
-
-.ovp-panel-toggle-body span {
-  font-size: 12px;
-  color: var(--rift-text-muted);
-  line-height: 1.5;
-}
-
-@media (max-width: 900px) {
-  .ovp-page {
-    padding: 20px 18px 36px;
+@media (max-width: 980px) {
+  .ovp-gallery--overlays,
+  .ovp-gallery--notify {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas: none;
   }
 
-  .ovp-control-top {
+  .ovp-tile--id-bench,
+  .ovp-tile--id-skill,
+  .ovp-tile--id-scout,
+  .ovp-tile--id-tftComp,
+  .ovp-tile--id-items,
+  .ovp-tile--id-winprob,
+  .ovp-tile--id-trinket,
+  .ovp-tile--id-obj {
+    grid-area: auto;
+  }
+
+  .ovp-tile--hero,
+  .ovp-tile--tall {
+    grid-column: 1 / -1;
+    min-height: 220px;
+  }
+}
+
+@media (max-width: 640px) {
+  .ovp-page { padding: 16px 14px 36px; }
+
+  .ovp-control-main,
+  .ovp-control-row {
     flex-direction: column;
+    align-items: stretch;
   }
 
-  .ovp-btn--lg {
-    width: 100%;
-  }
-
-  .ovp-panels-grid {
+  .ovp-gallery--overlays,
+  .ovp-gallery--notify {
     grid-template-columns: 1fr;
-  }
-
-  .ovp-setting-row {
-    flex-direction: column;
-    align-items: flex-start;
   }
 }

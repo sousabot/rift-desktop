@@ -33,6 +33,40 @@ function httpsUrl(value) {
   return String(value || '').replace(/^http:\/\//i, 'https://');
 }
 
+function asList(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === 'object') return [value];
+  return [];
+}
+
+function packTeam(raw) {
+  if (raw == null || raw === '') return { team: '', short: '', logo: '' };
+  if (typeof raw === 'string') {
+    const name = raw.trim();
+    return { team: name, short: name, logo: '' };
+  }
+  if (Array.isArray(raw)) {
+    return packTeam(raw.find((row) => row && (row.name || row.tag || typeof row === 'string')) || raw[0]);
+  }
+  if (raw.team && typeof raw.team === 'object' && !raw.name && !raw.tag) {
+    return packTeam(raw.team);
+  }
+  const name = String(raw.name || raw.tag || '').trim();
+  const tag = String(raw.tag || raw.name || '').trim();
+  return {
+    team: name,
+    short: tag,
+    logo: httpsUrl(raw.logo?.url || (typeof raw.logo === 'string' ? raw.logo : '')),
+  };
+}
+
+function currentTeamOf(raw) {
+  const listed = asList(raw?.teams).find((row) => row && !row.leave_date);
+  if (listed) return listed;
+  if (raw?.team) return raw.team;
+  return null;
+}
+
 function laneOf(position) {
   const r = String(position || '').toLowerCase();
   if (r.includes('jung')) return 'Jungle';
@@ -126,7 +160,7 @@ function packLadderRow(row) {
   const slug = String(row?.slug || '').trim();
   const name = String(row?.name || '').trim();
   if (!slug && !name) return null;
-  const team = row.team || {};
+  const org = packTeam(row.team);
   const league = Array.isArray(row.leagues) && row.leagues[0] ? row.leagues[0] : null;
   const account = packAccount(row.account);
   return {
@@ -135,9 +169,9 @@ function packLadderRow(row) {
     country: String(row.country || '').toUpperCase(),
     role: String(row.position || ''),
     lane: laneOf(row.position),
-    team: String(team.name || '').trim(),
-    short: String(team.tag || team.name || '').trim(),
-    logo: httpsUrl(team.logo?.url),
+    team: org.team,
+    short: org.short,
+    logo: org.logo,
     league: String(league?.shorthand || league?.name || '').trim(),
     leagueSlug: String(league?.slug || '').trim(),
     score: Number(row.score) || 0,
@@ -161,15 +195,16 @@ function packMemberRow(member, team, leagueShort) {
     winrate: member.winrate,
   });
   const ids = splitRiotId(member.summoner_name || '');
+  const org = packTeam(team);
   return {
     slug: slug || name.toLowerCase(),
     player: name || slug,
     country: String(member.country || '').toUpperCase(),
     role: String(member.position || ''),
     lane: laneOf(member.position),
-    team: String(team?.name || '').trim(),
-    short: String(team?.tag || team?.name || '').trim(),
-    logo: httpsUrl(team?.logo?.url),
+    team: org.team,
+    short: org.short,
+    logo: org.logo,
     league: leagueShort,
     score: Number(member.score) || 0,
     games: rank?.games ?? null,
@@ -179,7 +214,7 @@ function packMemberRow(member, team, leagueShort) {
 }
 
 function packHistory(teams) {
-  return (Array.isArray(teams) ? teams : []).slice(0, 16).map((row) => ({
+  return asList(teams).slice(0, 16).map((row) => ({
     team: String(row.name || row.tag || '').trim(),
     short: String(row.tag || '').trim(),
     logo: httpsUrl(row.logo?.url),
@@ -195,20 +230,21 @@ function packProfile(raw) {
   if (!slug && !name) return null;
   const lp = raw.league_player || {};
   const social = raw.social_media || {};
-  const currentTeam = (Array.isArray(raw.teams) ? raw.teams : []).find((row) => !row.leave_date) || null;
+  const currentTeam = currentTeamOf(raw);
+  const org = packTeam(currentTeam);
   const league = Array.isArray(raw.leagues) && raw.leagues[0] ? raw.leagues[0] : null;
   const rawAccounts = Array.isArray(lp.accounts) ? lp.accounts : [];
   const accounts = rawAccounts.map(packAccount).filter(Boolean).slice(0, 12);
   const primaryRaw = rawAccounts[0] || {};
   const primary = accounts[0] || null;
   const history = packHistory(raw.previous_teams);
-  if (currentTeam?.name && !history.some((row) => !row.end && row.team === String(currentTeam.name).trim())) {
+  if (org.team && !history.some((row) => !row.end && row.team === org.team)) {
     history.unshift({
-      team: String(currentTeam.name || '').trim(),
-      short: String(currentTeam.tag || '').trim(),
-      logo: httpsUrl(currentTeam.logo?.url),
+      team: org.team,
+      short: org.short,
+      logo: org.logo,
       role: laneOf(lp.position),
-      start: dayOf(currentTeam.join_date),
+      start: dayOf(currentTeam?.join_date),
       end: '',
     });
   }
@@ -241,9 +277,9 @@ function packProfile(raw) {
       .filter(Boolean),
     role: String(lp.position || ''),
     lane: laneOf(lp.position),
-    team: String(currentTeam?.name || '').trim(),
-    short: String(currentTeam?.tag || currentTeam?.name || '').trim(),
-    logo: httpsUrl(currentTeam?.logo?.url),
+    team: org.team,
+    short: org.short,
+    logo: org.logo,
     league: String(league?.shorthand || league?.name || '').trim(),
     leagueName: String(league?.name || '').trim(),
     leagueLogo: httpsUrl(league?.logo?.url),
@@ -372,11 +408,21 @@ async function enrichRosterFromLadder(players, { league, lane }) {
         row.games = extra.games ?? row.games;
         row.score = extra.score || row.score;
         if (extra.riotId) row.riotId = extra.riotId;
+        if (extra.team) {
+          row.team = extra.team;
+          row.short = extra.short || extra.team;
+          if (extra.logo) row.logo = extra.logo;
+        }
         filled += 1;
       } else if (!row.rank && extra.rank) {
         row.rank = extra.rank;
         row.games = extra.games;
         if (extra.riotId) row.riotId = extra.riotId;
+        if (extra.team && !row.team) {
+          row.team = extra.team;
+          row.short = extra.short || extra.team;
+          if (extra.logo) row.logo = extra.logo;
+        }
       }
     }
     if (batch.length < 100 || filled >= players.length) break;
@@ -414,31 +460,54 @@ async function loadLadder({ country, lane }) {
   return packed;
 }
 
+async function loadPackedProfile(slug) {
+  const key = String(slug || '').trim().toLowerCase().replace(/\s+/g, '-');
+  if (!key) return null;
+  const hit = cache.profiles.get(key);
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.player;
+  const profile = packProfile(await lolpros(`/es/profiles/${encodeURIComponent(key)}`));
+  if (profile) cache.profiles.set(profile.slug, { at: Date.now(), player: profile });
+  return profile;
+}
+
+function listRowFromProfile(profile) {
+  return {
+    slug: profile.slug,
+    player: profile.player,
+    country: profile.country,
+    role: profile.role,
+    lane: profile.lane,
+    team: profile.team,
+    short: profile.short,
+    logo: profile.logo,
+    league: profile.league,
+    rank: profile.rank,
+    riotId: profile.riotId,
+    games: profile.rank?.games ?? null,
+  };
+}
+
 async function searchPlayers(query) {
   const q = String(query || '').trim();
   if (q.length < 3) return [];
   const rows = await lolpros(`/es/search?query=${encodeURIComponent(q)}`);
-  const list = Array.isArray(rows) ? rows : [];
-  return list.slice(0, 40).map((row) => {
+  const stubs = (Array.isArray(rows) ? rows : []).slice(0, 40).map((row) => {
     const profile = packProfile(row);
-    if (profile) {
-      return {
-        slug: profile.slug,
-        player: profile.player,
-        country: profile.country,
-        role: profile.role,
-        lane: profile.lane,
-        team: profile.team,
-        short: profile.short,
-        logo: profile.logo,
-        league: profile.league,
-        rank: profile.rank,
-        riotId: profile.riotId,
-        games: profile.rank?.games ?? null,
-      };
-    }
-    return packLadderRow(row);
+    return profile ? listRowFromProfile(profile) : packLadderRow(row);
   }).filter(Boolean);
+  // Search hits omit `teams`; fill org from the full profile for the first few.
+  const missing = stubs.filter((row) => row.slug && !row.team).slice(0, 12);
+  await Promise.all(missing.map(async (row) => {
+    try {
+      const full = await loadPackedProfile(row.slug);
+      if (!full?.team) return;
+      row.team = full.team;
+      row.short = full.short || full.team;
+      row.logo = full.logo || row.logo;
+      row.league = full.league || row.league;
+    } catch { /* keep search stub */ }
+  }));
+  return stubs;
 }
 
 async function listPros(args = {}) {
@@ -485,20 +554,13 @@ async function getPro(slugOrName) {
   const raw = String(slugOrName || '').trim();
   if (!raw) return { ok: false, error: 'Missing player.' };
   const slug = raw.toLowerCase().replace(/\s+/g, '-');
-  const hit = cache.profiles.get(slug);
-  if (hit && Date.now() - hit.at < TTL_MS) {
-    return { ok: true, source: 'rift.lol', player: hit.player };
-  }
   try {
-    let profile = packProfile(await lolpros(`/es/profiles/${encodeURIComponent(slug)}`));
+    let profile = await loadPackedProfile(slug);
     if (!profile) {
       const found = await searchPlayers(raw);
-      if (found[0]?.slug) {
-        profile = packProfile(await lolpros(`/es/profiles/${encodeURIComponent(found[0].slug)}`));
-      }
+      if (found[0]?.slug) profile = await loadPackedProfile(found[0].slug);
     }
     if (!profile) return { ok: false, error: 'Player not on the esports ladder.' };
-    cache.profiles.set(profile.slug, { at: Date.now(), player: profile });
     return { ok: true, source: 'rift.lol', player: profile };
   } catch (err) {
     if (String(err.message || '').includes('404')) {
@@ -587,3 +649,6 @@ function register(ipcMain) {
 }
 
 module.exports = register;
+module.exports.listPros = listPros;
+module.exports.getPro = getPro;
+module.exports.lookupPro = lookupPro;

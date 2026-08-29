@@ -38,7 +38,7 @@ function ChampImg({ name, size = 36, version, className = '' }) {
       width={size}
       height={size}
       className={`wd-champ ${className}`}
-      onError={(e) => { e.currentTarget.src = champIconUrl('Aatrox', version); }}
+      onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }}
     />
   );
 }
@@ -149,6 +149,60 @@ function GeneralTab({ game, version, runeIndex }) {
   );
 }
 
+function BanStrip({ game, version }) {
+  const ally = (game.allyBans || []).filter((b) => b?.champion);
+  const enemy = (game.enemyBans || []).filter((b) => b?.champion);
+  if (!ally.length && !enemy.length) return null;
+  const side = (label, bans, tone) => (
+    <div className={`wd-ban-side is-${tone}`}>
+      <span>{label}</span>
+      <div>
+        {bans.length
+          ? bans.map((b, i) => (
+            <ChampImg key={`${b.championId}-${i}`} name={b.champion} size={26} version={version} />
+          ))
+          : <em className="muted">none</em>}
+      </div>
+    </div>
+  );
+  return (
+    <article className="wd-ban-card">
+      <h4>Draft bans</h4>
+      <div className="wd-ban-rows">
+        {side('Your team', ally, 'ally')}
+        {side('Enemy', enemy, 'enemy')}
+      </div>
+    </article>
+  );
+}
+
+const PHASES = [
+  { key: 'earlyScore', label: 'Early', sub: '0–15', color: '#5eb8ff' },
+  { key: 'midScore', label: 'Mid', sub: '15–25', color: '#ffb454' },
+  { key: 'lateScore', label: 'Late', sub: '25+', color: '#ff7ad9' },
+];
+
+function PhaseBars({ game }) {
+  const rows = PHASES
+    .map((p) => ({ ...p, value: Number(game[p.key]) }))
+    .filter((p) => Number.isFinite(p.value));
+  if (!rows.length) return null;
+  return (
+    <article className="wd-phase-bars">
+      <h4>Phase performance</h4>
+      {rows.map((p) => (
+        <div key={p.key} className="wd-phase-bar-row">
+          <span>{p.label} <em>{p.sub}</em></span>
+          <div className="wd-phase-bar">
+            <i style={{ width: `${Math.max(0, Math.min(100, p.value))}%`, background: p.color }} />
+          </div>
+          <strong>{Math.round(p.value)}</strong>
+        </div>
+      ))}
+    </article>
+  );
+}
+
 function DetailsTab({ game, version }) {
   const board = game.scoreboard || {};
   const players = board.players || [];
@@ -221,6 +275,11 @@ function DetailsTab({ game, version }) {
             <span>{p.roleKey?.[0] || '?'}</span>
           </div>
         ))}
+      </div>
+
+      <div className="wd-details-draft">
+        <BanStrip game={game} version={version} />
+        <PhaseBars game={game} />
       </div>
 
       <div className="wd-details-stats">

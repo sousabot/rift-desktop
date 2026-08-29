@@ -155,7 +155,27 @@ async function cutClip(inputPath, outputPath, start, duration) {
   return outputPath;
 }
 
-module.exports = { makeSeekableMp4, probeDurationSec, ffmpegBin, startWindowGrab, stopDesktopGrab, cutClip };
+module.exports = {
+  makeSeekableMp4,
+  probeDurationSec,
+  ffmpegBin,
+  startWindowGrab,
+  startDesktopRegionGrab,
+  stopDesktopGrab,
+  cutClip,
+};
+
+function encodeArgs(outPath) {
+  return [
+    '-an',
+    '-c:v', 'libx264',
+    '-preset', 'ultrafast',
+    '-pix_fmt', 'yuv420p',
+    '-g', '30',
+    '-movflags', '+frag_keyframe+empty_moov',
+    outPath,
+  ];
+}
 
 function startWindowGrab({ outPath, title = 'League of Legends (TM) Client' }) {
   const args = [
@@ -166,13 +186,29 @@ function startWindowGrab({ outPath, title = 'League of Legends (TM) Client' }) {
     '-framerate', '30',
     '-draw_mouse', '0',
     '-i', `title=${title}`,
-    '-an',
-    '-c:v', 'libx264',
-    '-preset', 'ultrafast',
-    '-pix_fmt', 'yuv420p',
-    '-g', '30',
-    '-movflags', '+frag_keyframe+empty_moov',
-    outPath,
+    ...encodeArgs(outPath),
+  ];
+  return spawn(ffmpegBin(), args, { windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
+}
+
+/** Capture composited desktop pixels in a window rect — needed for Unreal/TFT (title= gdigrab is pink/corrupt). */
+function startDesktopRegionGrab({ outPath, x = 0, y = 0, width = 1920, height = 1080 }) {
+  const w = Math.max(2, Math.floor(Number(width) / 2) * 2);
+  const h = Math.max(2, Math.floor(Number(height) / 2) * 2);
+  const ox = Math.round(Number(x) || 0);
+  const oy = Math.round(Number(y) || 0);
+  const args = [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-y',
+    '-f', 'gdigrab',
+    '-framerate', '30',
+    '-offset_x', String(ox),
+    '-offset_y', String(oy),
+    '-video_size', `${w}x${h}`,
+    '-draw_mouse', '0',
+    '-i', 'desktop',
+    ...encodeArgs(outPath),
   ];
   return spawn(ffmpegBin(), args, { windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
 }

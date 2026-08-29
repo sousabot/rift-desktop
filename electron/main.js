@@ -7,6 +7,7 @@ const recorder = require('./recorder');
 const { getLiveSnapshot, getLiveRoster } = require('./live-client');
 const { getVideoMode, ensureBorderless, enableFullscreenOptimizations } = require('./league-config');
 const overlayPanels = require('./overlay-panels');
+const { handle, safeRegister } = require('./ipc-handle');
 
 function broadcastPanelToggles(toggles) {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -17,6 +18,11 @@ function broadcastPanelToggles(toggles) {
 
 app.commandLine.appendSwitch('enable-features', 'OverlayScrollbar');
 app.setAppUserModelId('com.riftlol.desktop');
+handle(ipcMain, 'app:info', () => ({
+  version: app.getVersion(),
+  portable: Boolean(process.env.PORTABLE_EXECUTABLE_DIR),
+  packaged: app.isPackaged,
+}));
 recorder.prepare();
 
 const gotLock = app.requestSingleInstanceLock();
@@ -167,6 +173,9 @@ ipcMain.handle('overlay:useBorderless', () => ensureBorderless());
 ipcMain.on('overlay:ignoreMouse', (_e, ignore) => overlay.setIgnoreMouse(ignore));
 ipcMain.handle('overlay:getEditMode', () => overlay.isEditing());
 ipcMain.handle('overlay:toggleEdit', () => overlay.toggleEditMode());
+ipcMain.handle('overlay:getScoutDismissed', () => overlay.getScoutDismissed());
+ipcMain.handle('overlay:setScoutDismissed', (_e, value) => overlay.setScoutDismissed(value));
+ipcMain.handle('overlay:syncScoutGame', (_e, inGame) => overlay.syncScoutGame(inGame));
 ipcMain.on('overlay:startDrag', (e) => overlay.startDrag(e.sender));
 ipcMain.handle('overlay:getLayout', () => overlay.getLayout());
 ipcMain.handle('overlay:setPanelPos', (_e, id, point) => overlay.setPanelPos(id, point));
@@ -181,29 +190,28 @@ app.on('second-instance', () => showMainWindow());
 
 app.whenReady().then(() => {
   if (!gotLock) return;
-  overlay.init(app);
+  safeRegister('overlay', () => overlay.init(app));
   const riotIpc = require('./riot-ipc');
-  riotIpc(ipcMain);
-  require('./lcu').register(ipcMain);
-  require('./probuilds').register(ipcMain);
-  require('./spectate').register(ipcMain, { riotFetch: riotIpc.riotFetch });
-  registerStatsHandlers(ipcMain);
-  registerFeedbackHandlers(ipcMain);
-  try {
-    require('./premium-ipc')(ipcMain);
-  } catch (err) {
-    console.error('[premium] failed to register IPC handlers:', err);
-  }
-  require('./season-peak')(ipcMain);
-  require('./ugg-lp')(ipcMain);
-  require('./meta-builds')(ipcMain);
-  require('./champion-detail')(ipcMain);
-  require('./pros')(ipcMain);
-  recorder.register(ipcMain);
-  require('./updater').register({
+  safeRegister('riot-ipc', () => riotIpc(ipcMain));
+  const riotFetch = riotIpc.riotFetch;
+  safeRegister('lcu', () => require('./lcu').register(ipcMain));
+  safeRegister('probuilds', () => require('./probuilds').register(ipcMain));
+  safeRegister('spectate', () => require('./spectate').register(ipcMain, { riotFetch }));
+  safeRegister('stats', () => registerStatsHandlers(ipcMain));
+  safeRegister('feedback', () => registerFeedbackHandlers(ipcMain));
+  safeRegister('premium', () => require('./premium-ipc')(ipcMain));
+  safeRegister('season-peak', () => require('./season-peak')(ipcMain));
+  safeRegister('ugg-lp', () => require('./ugg-lp')(ipcMain));
+  safeRegister('meta-builds', () => require('./meta-builds')(ipcMain));
+  safeRegister('champion-detail', () => require('./champion-detail')(ipcMain));
+  safeRegister('pros', () => require('./pros')(ipcMain));
+  safeRegister('matchup-vods', () => require('./matchup-vods').register(ipcMain, { riotFetch }));
+  safeRegister('tft-comps', () => require('./tft-comps')(ipcMain));
+  safeRegister('recorder', () => recorder.register(ipcMain));
+  safeRegister('updater', () => require('./updater').register({
     getWindow: () => mainWindow,
     prepareQuit: () => { quitting = true; },
-  });
+  }));
   createTray();
   createWindow();
 

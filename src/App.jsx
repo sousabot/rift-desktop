@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, Outlet, Navigate } from 'react-router-dom';
+import { Routes, Route, Outlet } from 'react-router-dom';
 import { SessionProvider } from './state/SessionContext';
 import { LocaleProvider } from './i18n/LocaleContext';
 import { PremiumProvider } from './state/PremiumContext';
@@ -27,6 +27,9 @@ import TierList from './pages/TierList';
 import TierListChampion from './pages/TierListChampion';
 import Overlays from './pages/Overlays';
 import OverlayHud from './pages/OverlayHud';
+import Matchups from './pages/Matchups';
+import TftComps from './pages/TftComps';
+import Replays from './pages/Replays';
 
 export default function App() {
   return (
@@ -43,9 +46,11 @@ export default function App() {
             <Route path="/history" element={<History />} />
             <Route path="/compare" element={<Compare />} />
             <Route path="/collections" element={<Collections />} />
-            <Route path="/replays" element={<Navigate to="/" replace />} />
+            <Route path="/replays" element={<Replays />} />
             <Route path="/tierlist" element={<TierList />} />
             <Route path="/tierlist/:champion" element={<TierListChampion />} />
+            <Route path="/matchups" element={<Matchups />} />
+            <Route path="/tft" element={<TftComps />} />
             <Route path="/draft" element={<Draft />} />
             <Route path="/spectate" element={<Spectate />} />
             <Route path="/pros" element={<Pros />} />

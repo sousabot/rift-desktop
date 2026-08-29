@@ -7,6 +7,16 @@ import TierList from './pages/TierList';
 import ChampionDetail from './pages/ChampionDetail';
 import Leaderboard from './pages/Leaderboard';
 import Dashboard from './pages/Dashboard';
+import DataStudio from './pages/DataStudio';
+import Esports from './pages/Esports';
+import Synergy from './pages/Synergy';
+import Arena from './pages/Arena';
+import Aram from './pages/Aram';
+import Scouting from './pages/Scouting';
+import GetApp from './pages/GetApp';
+import Roadmap from './pages/Roadmap';
+import { getAppUrl, sitePageUrl } from './getAppUrl';
+import CommunityBlock from './components/CommunityBlock';
 
 const TIER_MENU = [
   {
@@ -19,43 +29,49 @@ const TIER_MENU = [
   {
     to: '/tierlist/synergy',
     title: 'Synergy',
-    blurb: 'Best champion duos and lane synergies — coming soon.',
+    blurb: 'Best champion duos and lane synergies by role pair.',
     icon: 'https://ddragon.leagueoflegends.com/cdn/16.16.1/img/champion/Tristana.png',
-    ready: false,
+    ready: true,
   },
   {
     to: '/tierlist/arena',
     title: 'Arena',
-    blurb: 'Arena mode tier list — coming soon.',
+    blurb: 'Arena mode tier list for the live patch.',
     icon: 'https://ddragon.leagueoflegends.com/cdn/16.16.1/img/champion/Sett.png',
-    ready: false,
+    ready: true,
   },
   {
     to: '/tierlist/aram',
     title: 'ARAM',
-    blurb: 'ARAM tier list — coming soon.',
+    blurb: 'Howling Abyss ARAM tier list for the live patch.',
     icon: 'https://ddragon.leagueoflegends.com/cdn/16.16.1/img/champion/Braum.png',
-    ready: false,
+    ready: true,
   },
 ];
 
 const LB_MENU = [
   {
-    to: '/leaderboard?tier=challenger',
-    title: 'Challenger',
-    blurb: 'Top Solo/Duo Challenger ladder by region.',
+    to: '/leaderboard?mode=soloq&tier=challenger',
+    title: 'SoloQ',
+    blurb: 'Ranked Solo/Duo ladder from every region.',
     ready: true,
   },
   {
-    to: '/leaderboard?tier=grandmaster',
-    title: 'Grandmaster',
-    blurb: 'Grandmaster ladder standings.',
+    to: '/leaderboard?mode=flex&tier=challenger',
+    title: 'Flex',
+    blurb: 'Ranked Flex ladder standings by region.',
     ready: true,
   },
   {
-    to: '/leaderboard?tier=master',
-    title: 'Master',
-    blurb: 'Master ladder standings.',
+    to: '/leaderboard?mode=otps',
+    title: 'OTPs',
+    blurb: 'One-tricks ranked by SoloQ LP.',
+    ready: true,
+  },
+  {
+    to: '/leaderboard?mode=aram',
+    title: 'ARAM',
+    blurb: 'Howling Abyss ladder — on the roadmap.',
     ready: true,
   },
 ];
@@ -148,22 +164,48 @@ function Shell() {
   const { session } = useSession();
   const location = useLocation();
   const [openMenu, setOpenMenu] = useState(null);
+  const [navOpen, setNavOpen] = useState(false);
+
+  const closeNav = () => {
+    setOpenMenu(null);
+    setNavOpen(false);
+  };
+
+  useEffect(() => { closeNav(); }, [location.pathname]);
+
+  useEffect(() => {
+    document.body.classList.toggle('nav-locked', navOpen);
+    return () => document.body.classList.remove('nav-locked');
+  }, [navOpen]);
+
+  useEffect(() => {
+    if (!navOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeNav();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navOpen]);
 
   const tierActive = location.pathname.startsWith('/tierlist');
   const lbActive = location.pathname.startsWith('/leaderboard');
   const dashActive = location.pathname.startsWith('/dashboard');
-  const wideMain = dashActive;
+  const studioActive = location.pathname.startsWith('/data-studio');
+  const esportsActive = location.pathname.startsWith('/esports');
+  const scoutingActive = location.pathname.startsWith('/scouting');
+  const getAppActive = location.pathname.startsWith('/get-app');
+  const wideMain = dashActive || studioActive || esportsActive || scoutingActive || getAppActive;
 
   return (
     <div className="site-shell">
       <nav className="topnav">
         <div className="topnav-inner">
-          <Link className="brand" to="/" onClick={() => setOpenMenu(null)}>
+          <Link className="brand" to="/" onClick={closeNav}>
             <img src="./icon.png" alt="" />
             RIFT.LOL
           </Link>
           <div className="topnav-links">
-            <NavLink to="/dashboard" onClick={() => setOpenMenu(null)}>Dashboard</NavLink>
+            <NavLink to="/dashboard" onClick={closeNav}>Dashboard</NavLink>
             <NavDropdown
               id="nav-tier-menu"
               label="Tierlist & Builds"
@@ -182,35 +224,85 @@ function Shell() {
               onToggle={() => setOpenMenu((v) => (v === 'lb' ? null : 'lb'))}
               onClose={() => setOpenMenu(null)}
             />
-            <NavLink to="/profile" onClick={() => setOpenMenu(null)}>Profile</NavLink>
+            <span className="topnav-divider" aria-hidden="true" />
+            <NavLink to="/scouting" onClick={closeNav}>Scouting</NavLink>
+            <NavLink to="/data-studio" onClick={closeNav}>Data Studio</NavLink>
+            <NavLink to="/esports" onClick={closeNav}>Esports</NavLink>
+            <NavLink to="/profile" onClick={closeNav}>Profile</NavLink>
           </div>
           <div className="topnav-actions">
             {session ? (
-              <Link className="pill" to="/dashboard">
+              <Link className="pill" to="/dashboard" onClick={closeNav}>
                 {session.gameName}#{session.tagLine}
               </Link>
             ) : (
-              <Link className="btn btn-violet btn-sm" to="/profile">Link profile</Link>
+              <Link className="btn btn-violet btn-sm topnav-link-profile" to="/profile" onClick={closeNav}>
+                Link profile
+              </Link>
             )}
-            <a className="btn btn-gold btn-sm" href="../index.html">Get App</a>
+            <Link className={`btn btn-gold btn-sm${getAppActive ? ' is-on' : ''}`} to={getAppUrl()} onClick={closeNav}>
+              Get App
+            </Link>
+            <button
+              type="button"
+              className={`nav-burger${navOpen ? ' is-open' : ''}`}
+              aria-label={navOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={navOpen}
+              onClick={() => setNavOpen((v) => !v)}
+            >
+              <span /><span /><span />
+            </button>
           </div>
         </div>
+        {navOpen ? (
+          <div className="nav-drawer" role="dialog" aria-label="Site menu">
+            <button type="button" className="nav-drawer-backdrop" aria-label="Close menu" onClick={closeNav} />
+            <div className="nav-drawer-panel">
+              <NavLink to="/dashboard" onClick={closeNav}>Dashboard</NavLink>
+              <NavLink to="/scouting" onClick={closeNav}>Scouting</NavLink>
+              <NavLink to="/data-studio" onClick={closeNav}>Data Studio</NavLink>
+              <NavLink to="/esports" onClick={closeNav}>Esports</NavLink>
+              <NavLink to="/roadmap" onClick={closeNav}>Roadmap</NavLink>
+              <p>Tierlist &amp; Builds</p>
+              {TIER_MENU.map((item) => (
+                <Link key={item.to} to={item.to} onClick={closeNav}>{item.title}</Link>
+              ))}
+              <p>Leaderboards</p>
+              {LB_MENU.map((item) => (
+                <Link key={item.to} to={item.to} onClick={closeNav}>{item.title}</Link>
+              ))}
+              <p>Account</p>
+              {session ? (
+                <Link to="/dashboard" onClick={closeNav}>{session.gameName}#{session.tagLine}</Link>
+              ) : (
+                <Link to="/profile" onClick={closeNav}>Link profile</Link>
+              )}
+              <Link className="nav-drawer-app" to={getAppUrl()} onClick={closeNav}>Get the app</Link>
+            </div>
+          </div>
+        ) : null}
       </nav>
 
-      <main className={`site-main${wideMain ? ' is-wide' : ''}`}>
+      <main className={`site-main${wideMain ? ' is-wide' : ''}${getAppActive ? ' is-landing' : ''}`}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/tierlist" element={<TierList />} />
-          <Route path="/tierlist/synergy" element={<ComingSoon title="Synergy" blurb="Find the best champion duos and lane pairings." />} />
-          <Route path="/tierlist/arena" element={<ComingSoon title="Arena" blurb="Arena mode tier list for the live patch." />} />
-          <Route path="/tierlist/aram" element={<ComingSoon title="ARAM" blurb="Howling Abyss ARAM tier list." />} />
+          <Route path="/tierlist/synergy" element={<Synergy />} />
+          <Route path="/tierlist/arena" element={<Arena />} />
+          <Route path="/tierlist/aram" element={<Aram />} />
           <Route path="/tierlist/:champion" element={<ChampionDetail />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
+          <Route path="/scouting" element={<Scouting />} />
+          <Route path="/get-app" element={<GetApp />} />
+          <Route path="/data-studio" element={<DataStudio />} />
+          <Route path="/esports" element={<Esports />} />
+          <Route path="/roadmap" element={<Roadmap />} />
         </Routes>
       </main>
 
+      {!getAppActive ? (
       <footer className="foot">
         <div className="foot-inner foot-rich">
           <div className="foot-brand">
@@ -226,20 +318,22 @@ function Shell() {
               <Link to="/dashboard">Dashboard</Link>
               <Link to="/tierlist">Tier list</Link>
               <Link to="/leaderboard">Leaderboards</Link>
+              <Link to="/scouting">Scouting</Link>
               <Link to="/profile">Link profile</Link>
             </div>
             <div>
               <h4>Product</h4>
-              <a href="../index.html">Desktop app</a>
-              <a href="../roadmap.html">Roadmap</a>
-              <a href="../index.html#premium">Premium</a>
+              <Link to={getAppUrl()}>Desktop app</Link>
+              <Link to="/roadmap">Roadmap</Link>
+              <Link to={getAppUrl('premium')}>Premium</Link>
             </div>
             <div>
               <h4>Support</h4>
-              <a href="../privacy.html">Privacy</a>
-              <a href="../terms.html">Terms</a>
+              <a href={sitePageUrl('privacy.html')}>Privacy</a>
+              <a href={sitePageUrl('terms.html')}>Terms</a>
               <a href="https://x.com/RIFT_LOL_" target="_blank" rel="noreferrer">Twitter / X</a>
             </div>
+            <CommunityBlock />
           </div>
         </div>
         <div className="foot-bottom">
@@ -247,6 +341,7 @@ function Shell() {
           <span className="muted">Not endorsed by Riot Games</span>
         </div>
       </footer>
+      ) : null}
     </div>
   );
 }

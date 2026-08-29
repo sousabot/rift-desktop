@@ -33,27 +33,64 @@ export function champDdragonId(name) {
   const raw = String(name || 'Aatrox').trim();
   const SLUG = {
     "Bel'Veth": 'Belveth',
+    BelVeth: 'Belveth',
     "Cho'Gath": 'Chogath',
+    ChoGath: 'Chogath',
     "Kai'Sa": 'Kaisa',
+    KaiSa: 'Kaisa',
     "Kha'Zix": 'Khazix',
+    KhaZix: 'Khazix',
     "Kog'Maw": 'KogMaw',
-    "Lee Sin": 'LeeSin',
-    "Master Yi": 'MasterYi',
-    "Miss Fortune": 'MissFortune',
-    "Nunu & Willump": 'Nunu',
+    'Lee Sin': 'LeeSin',
+    'Master Yi': 'MasterYi',
+    'Miss Fortune': 'MissFortune',
+    'Nunu & Willump': 'Nunu',
     "Rek'Sai": 'RekSai',
-    "Renata Glasc": 'Renata',
-    "Tahm Kench": 'TahmKench',
-    "Twisted Fate": 'TwistedFate',
+    RekSai: 'RekSai',
+    'Renata Glasc': 'Renata',
+    RenataGlasc: 'Renata',
+    'Tahm Kench': 'TahmKench',
+    'Twisted Fate': 'TwistedFate',
     "Vel'Koz": 'Velkoz',
-    "Xin Zhao": 'XinZhao',
-    "Aurelion Sol": 'AurelionSol',
-    "Jarvan IV": 'JarvanIV',
+    VelKoz: 'Velkoz',
+    'Xin Zhao': 'XinZhao',
+    'Aurelion Sol': 'AurelionSol',
+    'Jarvan IV': 'JarvanIV',
     Wukong: 'MonkeyKing',
-    "Dr. Mundo": 'DrMundo',
+    'Monkey King': 'MonkeyKing',
+    MonkeyKing: 'MonkeyKing',
+    'Dr. Mundo': 'DrMundo',
+    DrMundo: 'DrMundo',
+    LeBlanc: 'Leblanc',
   };
   if (SLUG[raw]) return SLUG[raw];
-  return raw.replace(/[^a-zA-Z0-9]/g, '');
+  const compact = raw.replace(/[^a-zA-Z0-9]/g, '');
+  if (SLUG[compact]) return SLUG[compact];
+  const COMPACT = {
+    belveth: 'Belveth',
+    chogath: 'Chogath',
+    kaisa: 'Kaisa',
+    khazix: 'Khazix',
+    kogmaw: 'KogMaw',
+    leesin: 'LeeSin',
+    masteryi: 'MasterYi',
+    missfortune: 'MissFortune',
+    reksai: 'RekSai',
+    renataglasc: 'Renata',
+    tahmkench: 'TahmKench',
+    twistedfate: 'TwistedFate',
+    velkoz: 'Velkoz',
+    xinzhao: 'XinZhao',
+    aurelionsol: 'AurelionSol',
+    jarvaniv: 'JarvanIV',
+    wukong: 'MonkeyKing',
+    monkeyking: 'MonkeyKing',
+    drmundo: 'DrMundo',
+    leblanc: 'Leblanc',
+  };
+  const lower = compact.toLowerCase();
+  if (COMPACT[lower]) return COMPACT[lower];
+  return compact || 'Aatrox';
 }
 
 export function champIconUrl(name, version = '16.16.1') {
@@ -156,21 +193,19 @@ const EMPTY_PING_TOTALS = {
   },
 };
 
-/** Career sidebar only — never fall back to last-20 Solo games. */
+/**
+ * Sidebar aggregates. Renders whatever the dashboard already returned (last-N
+ * games) so the cards are never blank, then swaps to the wider career scan once
+ * `/career-sidebar` lands and sets `careerSidebar`.
+ */
 export function deriveDashboardExtras(profile) {
   const career = Boolean(profile?.careerSidebar);
   const apiRoles = Array.isArray(profile?.rolePerformance) ? profile.rolePerformance : [];
   const apiPlayed = Array.isArray(profile?.playedWith) ? profile.playedWith : [];
 
-  const rolePerformance = career && apiRoles.length
-    ? apiRoles
-    : deriveRolePerformance([]); // empty 5-role skeleton
-  const playedWith = career && apiPlayed.length
-    ? apiPlayed.slice(0, 4)
-    : [];
-  const totalPings = career && profile?.totalPings?.totals
-    ? profile.totalPings
-    : EMPTY_PING_TOTALS;
+  const rolePerformance = apiRoles.length ? apiRoles : deriveRolePerformance([]);
+  const playedWith = apiPlayed.slice(0, 4);
+  const totalPings = profile?.totalPings?.totals ? profile.totalPings : EMPTY_PING_TOTALS;
   return { rolePerformance, playedWith, totalPings, career };
 }
 
@@ -343,6 +378,18 @@ export function runeIconUrl(id, index = {}) {
 export function profileIconUrl(id, version = '16.16.1') {
   if (!id) return '';
   return `https://ddragon.leagueoflegends.com/cdn/${version}/img/profileicon/${id}.png`;
+}
+
+/** Short "how stale is this" label for cache timestamps. Returns '' when unknown. */
+export function timeAgo(ts) {
+  if (!ts) return '';
+  const mins = Math.round((Date.now() - Number(ts)) / 60000);
+  if (!Number.isFinite(mins) || mins < 0) return '';
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
 }
 
 export async function ddragonVersion() {

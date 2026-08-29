@@ -12,6 +12,8 @@ let lastVideo = null;
 let clickThrough = true;
 let editing = false;
 let lastToggleAt = 0;
+/** Survives overlay remount on alt-tab — Match Scout stays as the user left it. */
+let scoutDismissed = true;
 
 function emitEdit() {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -24,11 +26,33 @@ function applyInputMode() {
   desktop.setClickThrough(clickThrough && !editing);
 }
 
-function emitScoutToggle() {
+function broadcastScoutState() {
+  const payload = { dismissed: scoutDismissed };
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed()) continue;
-    try { win.webContents.send('overlay:scoutToggle'); } catch { /* ignore */ }
+    try { win.webContents.send('overlay:scoutState', payload); } catch { /* ignore */ }
   }
+}
+
+function emitScoutToggle() {
+  scoutDismissed = !scoutDismissed;
+  broadcastScoutState();
+}
+
+function getScoutDismissed() {
+  return scoutDismissed;
+}
+
+function setScoutDismissed(next) {
+  scoutDismissed = !!next;
+  broadcastScoutState();
+  return scoutDismissed;
+}
+
+function syncScoutGame(_inGame) {
+  // Do not reset on inGame flickers — alt-tab remount starts with inGame:false
+  // and would re-open or wipe the user's Ctrl+Shift+S choice.
+  return { dismissed: scoutDismissed };
 }
 
 function syncDesktopHotkey() {
@@ -89,8 +113,9 @@ function init(app) {
   electronApp = app;
   if (!ENABLED) return;
   desktop.setPanels(loadPos());
-  desktop.setAttachListener((attached) => {
-    if (!attached && editing) toggleEditMode(false);
+  desktop.setAttachListener((state) => {
+    const on = typeof state === 'object' ? !!state?.attached : !!state;
+    if (!on && editing) toggleEditMode(false);
   });
   desktop.setWindowReadyListener(() => {
     startEditHotkeys();
@@ -136,7 +161,7 @@ function getClickThrough() {
 
 function setIgnoreMouse(ignore) {
   if (editing) return;
-  if (ignore) desktop.setIgnoreMouse(true);
+  desktop.setIgnoreMouse(!!ignore);
 }
 
 function startDrag() {
@@ -161,16 +186,19 @@ function getLastVideo() {
 
 function getStatus() {
   if (!ENABLED) {
-    return { engine: 'off', ready: false, wanted: false, attached: false, phase: 'disabled' };
+    return { engine: 'off', ready: false, wanted: false, attached: false, kind: null, phase: 'disabled' };
   }
   const wanted = desktop.isOverlayOpen();
-  const attached = desktop.isAttached();
+  const attachState = desktop.isAttached();
+  const attached = typeof attachState === 'object' ? !!attachState?.attached : !!attachState;
+  const kind = typeof attachState === 'object' ? attachState?.kind || null : null;
   const surface = desktop.hasOverlaySurface?.() || false;
   return {
     engine: 'desktop',
     ready: true,
     wanted,
     attached,
+    kind,
     injected: false,
     phase: !wanted ? 'idle' : (attached && surface ? 'attached' : 'waiting'),
     video: lastVideo || null,
@@ -208,4 +236,7 @@ module.exports = {
   getLastVideo,
   getStatus,
   unregisterHotkeys,
+  getScoutDismissed,
+  setScoutDismissed,
+  syncScoutGame,
 };

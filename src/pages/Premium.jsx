@@ -7,27 +7,29 @@ import { PLANS } from '../lib/premium';
 import './Premium.css';
 
 const ROWS = [
-  { group: 'premium.groupCore', items: [
-    { name: 'premium.featDash', free: true, premium: true },
+  { group: 'premium.groupDesktop', items: [
+    { name: 'premium.featOverlays', free: false, premium: true },
+    { name: 'premium.featDraft', free: false, premium: true },
+    { name: 'premium.featRecorder', free: false, premium: true },
+    { name: 'premium.featSpectate', free: false, premium: true },
+    { name: 'premium.featCollections', free: false, premium: true },
+    { name: 'premium.featDash', free: false, premium: true },
+    { name: 'premium.featLive', free: false, premium: true },
+    { name: 'premium.featCompare', free: false, premium: true },
+    { name: 'premium.featEsports', free: false, premium: true },
+    { name: 'premium.featAnalyzer', free: false, premium: 'soon' },
+  ] },
+  { group: 'premium.groupStats', items: [
     { name: 'premium.featHistory', free: true, premium: true },
     { name: 'premium.featChamps', free: true, premium: true },
     { name: 'premium.featBoard', free: true, premium: true },
-    { name: 'premium.featLive', free: true, premium: true },
-    { name: 'premium.featDraft', free: true, premium: true },
-    { name: 'premium.featSpectate', free: true, premium: true },
-    { name: 'premium.featCompare', free: true, premium: true },
-    { name: 'premium.featCollections', free: true, premium: true },
-    { name: 'premium.featEsports', free: true, premium: true },
-    { name: 'premium.featOverlays', free: true, premium: true },
-  ] },
-  { group: 'premium.groupTools', items: [
-    { name: 'premium.featStudio', free: false, premium: true },
+    { name: 'premium.featBuilds', free: true, premium: true },
     { name: 'premium.featLens', free: false, premium: true },
+    { name: 'premium.featStudio', free: false, premium: true },
   ] },
-  { group: 'premium.groupSoon', items: [
-    { name: 'premium.featMeta', free: false, premium: 'soon' },
-    { name: 'premium.featReplays', free: false, premium: 'soon' },
-    { name: 'premium.featTier', free: false, premium: 'soon' },
+  { group: 'premium.groupWeb', items: [
+    { name: 'premium.featWebBrowse', free: true, premium: true },
+    { name: 'premium.featWebScout', free: true, premium: true },
   ] },
 ];
 

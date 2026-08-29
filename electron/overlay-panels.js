@@ -10,6 +10,7 @@ const DEFAULT = {
   skill: true,
   winprob: true,
   scout: true,
+  tftComp: true,
 };
 
 const PANEL_IDS = new Set(Object.keys(DEFAULT));

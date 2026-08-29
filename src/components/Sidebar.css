@@ -68,6 +68,13 @@
   border-radius: 0 3px 3px 0;
   background: var(--rift-violet);
 }
+.rift-sidebar__link--clips.rift-sidebar__link--active {
+  background: rgba(61, 214, 140, 0.12);
+  color: #9dffc4;
+}
+.rift-sidebar__link--clips.rift-sidebar__link--active::before {
+  background: #3dd68c;
+}
 .rift-sidebar__icon {
   width: 18px; height: 18px; display: grid; place-items: center; flex-shrink: 0;
 }

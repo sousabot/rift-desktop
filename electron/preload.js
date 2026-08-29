@@ -107,6 +107,22 @@ contextBridge.exposeInMainWorld('prosAPI', {
   lookup: (riotId) => ipcRenderer.invoke('pros:lookup', riotId),
 });
 
+contextBridge.exposeInMainWorld('matchupsAPI', {
+  search: (args) => ipcRenderer.invoke('matchups:search', args),
+  streamers: () => ipcRenderer.invoke('matchups:streamers'),
+});
+
+contextBridge.exposeInMainWorld('tftAPI', {
+  getComps: (args) => ipcRenderer.invoke('tft:comps', args),
+  getPinned: () => ipcRenderer.invoke('tft:getPinned'),
+  setPinned: (comp) => ipcRenderer.invoke('tft:setPinned', comp),
+  onPinned: (cb) => {
+    const handler = (_e, value) => cb(value);
+    ipcRenderer.on('tft:pinned', handler);
+    return () => ipcRenderer.removeListener('tft:pinned', handler);
+  },
+});
+
 contextBridge.exposeInMainWorld('spectateAPI', {
   list: (args) => ipcRenderer.invoke('spectate:list', args),
   launch: (args) => ipcRenderer.invoke('spectate:launch', args),
@@ -127,6 +143,9 @@ contextBridge.exposeInMainWorld('replaysAPI', {
   prepare: (args) => ipcRenderer.invoke('replays:prepare', args),
   saveTranscode: (args) => ipcRenderer.invoke('replays:saveTranscode', args),
   slice: (args) => ipcRenderer.invoke('replays:slice', args),
+  diskInfo: () => ipcRenderer.invoke('replays:diskInfo'),
+  saveMoment: () => ipcRenderer.invoke('replays:saveMoment'),
+  exportExcerpt: (args) => ipcRenderer.invoke('replays:exportExcerpt', args),
   onStatus: (cb) => {
     const handler = (_e, value) => cb(value);
     ipcRenderer.on('replays:status', handler);
@@ -179,10 +198,19 @@ contextBridge.exposeInMainWorld('liveClient', {
     return () => ipcRenderer.removeListener('overlay:editMode', handler);
   },
   onScoutToggle: (cb) => {
-    const handler = () => cb();
-    ipcRenderer.on('overlay:scoutToggle', handler);
-    return () => ipcRenderer.removeListener('overlay:scoutToggle', handler);
+    const handler = (_e, state) => cb(state);
+    ipcRenderer.on('overlay:scoutState', handler);
+    // Legacy alias — older builds only emitted scoutToggle with no payload.
+    const legacy = () => cb();
+    ipcRenderer.on('overlay:scoutToggle', legacy);
+    return () => {
+      ipcRenderer.removeListener('overlay:scoutState', handler);
+      ipcRenderer.removeListener('overlay:scoutToggle', legacy);
+    };
   },
+  getScoutDismissed: () => ipcRenderer.invoke('overlay:getScoutDismissed'),
+  setScoutDismissed: (value) => ipcRenderer.invoke('overlay:setScoutDismissed', value),
+  syncScoutGame: (inGame) => ipcRenderer.invoke('overlay:syncScoutGame', inGame),
   getPanelToggles: () => ipcRenderer.invoke('overlay:getPanelToggles'),
   setPanelToggle: (id, enabled) => ipcRenderer.invoke('overlay:setPanelToggle', id, enabled),
   onPanelToggles: (cb) => {

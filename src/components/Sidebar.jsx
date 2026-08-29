@@ -116,6 +116,15 @@ function IconDraft() {
     </svg>
   );
 }
+function IconTft() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M4.2 14.2 10 3.8l5.8 10.4H4.2Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+      <path d="M7.2 14.2h5.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      <circle cx="10" cy="11.2" r="1.2" fill="currentColor"/>
+    </svg>
+  );
+}
 function IconStudio() {
   return (
     <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
@@ -142,6 +151,7 @@ const NAV_GROUPS = [
       { to: '/history', labelKey: 'nav.history', icon: <IconHistory /> },
       { to: '/champions', labelKey: 'nav.champions', icon: <IconChamp /> },
       { to: '/tierlist', labelKey: 'nav.tierList', icon: <IconTier /> },
+      { to: '/matchups', labelKey: 'nav.matchups', icon: <IconCompare /> },
       { to: '/leaderboard', labelKey: 'nav.leaderboard', icon: <IconList /> },
       { to: '/live', labelKey: 'nav.live', icon: <IconLive /> },
       { to: '/compare', labelKey: 'nav.compare', icon: <IconCompare /> },
@@ -152,7 +162,8 @@ const NAV_GROUPS = [
     items: [
       { to: '/link-account', labelKey: 'nav.link', icon: <IconLink /> },
       { to: '/draft', labelKey: 'nav.draft', icon: <IconDraft /> },
-      { labelKey: 'nav.replays', icon: <IconReplay />, soon: true },
+      { to: '/replays', labelKey: 'nav.replays', icon: <IconReplay /> },
+      { to: '/tft', labelKey: 'nav.tft', icon: <IconTft /> },
       { to: '/overlays', labelKey: 'nav.overlays', icon: <IconGrid /> },
       { to: '/spectate', labelKey: 'nav.spectate', icon: <IconWatch /> },
       { to: '/collections', labelKey: 'nav.collections', icon: <IconCollection /> },
@@ -207,7 +218,7 @@ export default function Sidebar() {
                   to={playerNavTo(item.to, searchParams)}
                   end={item.end}
                   className={({ isActive }) =>
-                    `rift-sidebar__link${isActive ? ' rift-sidebar__link--active' : ''}`
+                    `rift-sidebar__link${isActive ? ' rift-sidebar__link--active' : ''}${item.to === '/replays' && isActive ? ' rift-sidebar__link--clips' : ''}`
                   }
                 >
                   <span className="rift-sidebar__icon">{item.icon}</span>

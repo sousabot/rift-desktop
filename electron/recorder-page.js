@@ -19,18 +19,12 @@ window.recorderBridge.onStop(() => {
 window.recorderBridge.onGameTime((t) => {
   gameTime = Number(t) || 0;
 });
-window.recorderBridge.onFocus((focused) => {
-  if (focused) armedPause = true;
-  wantPause = armedPause && !focused;
-  applyPause();
+window.recorderBridge.onFocus(() => {
+  // Ignore focus changes — keep MediaRecorder running through alt-tab.
 });
 
 function applyPause() {
-  if (!recorder) return;
-  try {
-    if (wantPause && recorder.state === 'recording') recorder.pause();
-    if (!wantPause && recorder.state === 'paused') recorder.resume();
-  } catch { /* ignore */ }
+  // Focus-based pause disabled.
 }
 
 function videoConstraints(sourceId, opts) {
@@ -65,10 +59,12 @@ function withTimeout(promise, ms, message) {
 }
 
 function isGameWindowName(name) {
-  const n = String(name || '');
+  const n = String(name || '').trim();
   if (/Riot Client/i.test(n)) return false;
   if (/League of Legends \(TM\) Client/i.test(n)) return true;
   if (/League of Legends \(TM\)/i.test(n)) return true;
+  if (/^TFT\b/i.test(n)) return true;
+  if (/Teamfight Tactics/i.test(n)) return true;
   return false;
 }
 

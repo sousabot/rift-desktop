@@ -26,7 +26,72 @@ export function useDdragonVersion() {
 }
 
 export function champDdragonId(name) {
-  return String(name || 'Aatrox').replace(/[^a-zA-Z0-9]/g, '').replace(/^./, (c) => c.toUpperCase());
+  const raw = String(name || 'Aatrox').trim();
+  // Display name / alias → Data Dragon champion id (cdn/.../img/champion/{id}.png).
+  const SLUG = {
+    "Bel'Veth": 'Belveth',
+    BelVeth: 'Belveth',
+    "Cho'Gath": 'Chogath',
+    ChoGath: 'Chogath',
+    "Kai'Sa": 'Kaisa',
+    KaiSa: 'Kaisa',
+    "Kha'Zix": 'Khazix',
+    KhaZix: 'Khazix',
+    "Kog'Maw": 'KogMaw',
+    KogMaw: 'KogMaw',
+    'Lee Sin': 'LeeSin',
+    'Master Yi': 'MasterYi',
+    'Miss Fortune': 'MissFortune',
+    'Nunu & Willump': 'Nunu',
+    Nunu: 'Nunu',
+    "Rek'Sai": 'RekSai',
+    RekSai: 'RekSai',
+    'Renata Glasc': 'Renata',
+    RenataGlasc: 'Renata',
+    'Tahm Kench': 'TahmKench',
+    'Twisted Fate': 'TwistedFate',
+    "Vel'Koz": 'Velkoz',
+    VelKoz: 'Velkoz',
+    'Xin Zhao': 'XinZhao',
+    'Aurelion Sol': 'AurelionSol',
+    'Jarvan IV': 'JarvanIV',
+    Wukong: 'MonkeyKing',
+    MonkeyKing: 'MonkeyKing',
+    'Dr. Mundo': 'DrMundo',
+    DrMundo: 'DrMundo',
+    "LeBlanc": 'Leblanc',
+    LeBlanc: 'Leblanc',
+    'Monkey King': 'MonkeyKing',
+  };
+  if (SLUG[raw]) return SLUG[raw];
+  const compact = raw.replace(/[^a-zA-Z0-9]/g, '');
+  if (SLUG[compact]) return SLUG[compact];
+  // Prefer known title-case ids from a small set of awkward compact forms.
+  const COMPACT = {
+    belveth: 'Belveth',
+    chogath: 'Chogath',
+    kaisa: 'Kaisa',
+    khazix: 'Khazix',
+    kogmaw: 'KogMaw',
+    leesin: 'LeeSin',
+    masteryi: 'MasterYi',
+    missfortune: 'MissFortune',
+    reksai: 'RekSai',
+    renataglasc: 'Renata',
+    tahmkench: 'TahmKench',
+    twistedfate: 'TwistedFate',
+    velkoz: 'Velkoz',
+    xinzhao: 'XinZhao',
+    aurelionsol: 'AurelionSol',
+    jarvaniv: 'JarvanIV',
+    wukong: 'MonkeyKing',
+    monkeyking: 'MonkeyKing',
+    drmundo: 'DrMundo',
+    leblanc: 'Leblanc',
+  };
+  const lower = compact.toLowerCase();
+  if (COMPACT[lower]) return COMPACT[lower];
+  return compact.replace(/^./, (c) => c.toUpperCase()) || 'Aatrox';
 }
 
 function normChampName(name) {

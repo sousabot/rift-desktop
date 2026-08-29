@@ -32,13 +32,14 @@
   if (portableMeta && ver) portableMeta.textContent = portableName;
 
   if (base) {
-    if (setupBtn) setupBtn.href = setupUrl;
+    // Hero "Get the app" stays on #premium — only the download section gets the installer URL.
     if (setupBtn2) setupBtn2.href = setupUrl;
-    if (navDownload) navDownload.href = setupUrl;
+    if (setupBtn && setupBtn.getAttribute('href') === '#download') setupBtn.href = '#premium';
+    if (navDownload) navDownload.href = '#premium';
     if (portableBtn) portableBtn.href = portableUrl;
     if (releasesBtn) releasesBtn.href = release;
   } else {
-    [setupBtn, setupBtn2, navDownload, portableBtn, releasesBtn].forEach((btn) => {
+    [setupBtn2, portableBtn, releasesBtn].forEach((btn) => {
       if (!btn) return;
       btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -47,65 +48,74 @@
     });
   }
 
+  const twHandle = String(cfg.twitter || 'RIFT_LOL_').replace(/^@/, '');
+  const discord = String(cfg.discord || '').trim() || 'https://discord.gg/riftlol';
+  const setHref = (id, href) => {
+    const el = document.getElementById(id);
+    if (el && href) el.href = href;
+  };
+  setHref('communityDiscord', discord);
+  setHref('socialDiscord', discord);
+  setHref('socialTwitter', `https://x.com/${twHandle}`);
+  setHref('socialInstagram', String(cfg.instagram || '').trim());
+  setHref('socialTiktok', String(cfg.tiktok || '').trim());
+  setHref('socialLinkedin', String(cfg.linkedin || '').trim());
+
+  // —— Premium checkout (web) ——
+  const DEVICE_KEY = 'rift-web-device-id';
+  function webDeviceId() {
+    try {
+      let id = localStorage.getItem(DEVICE_KEY);
+      if (!id) {
+        id = `web-${crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+        localStorage.setItem(DEVICE_KEY, id);
+      }
+      return id;
+    } catch {
+      return `web-${Date.now()}`;
+    }
+  }
+
+  const apiBase = String(cfg.apiBase || window.RIFT_WEB_API || 'https://gd-desktop.onrender.com').replace(/\/$/, '');
+  const checkoutError = document.getElementById('premiumCheckoutError');
+  const planButtons = document.querySelectorAll('[data-premium-plan]');
+
+  async function startCheckout(plan, btn) {
+    if (checkoutError) {
+      checkoutError.hidden = true;
+      checkoutError.textContent = '';
+    }
+    planButtons.forEach((b) => { b.disabled = true; });
+    const label = btn.textContent;
+    btn.textContent = 'Opening checkout…';
+    try {
+      const params = new URLSearchParams({ plan, deviceId: webDeviceId() });
+      const res = await fetch(`${apiBase}/v1/web/premium/checkout?${params}`);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `Checkout failed (${res.status})`);
+      if (!body.url) throw new Error('Checkout did not return a payment link.');
+      window.location.href = body.url;
+    } catch (err) {
+      if (checkoutError) {
+        checkoutError.hidden = false;
+        checkoutError.textContent = err.message || 'Could not start Premium checkout.';
+      }
+      planButtons.forEach((b) => { b.disabled = false; });
+      btn.textContent = label;
+    }
+  }
+
+  planButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const plan = btn.getAttribute('data-premium-plan');
+      if (plan) startCheckout(plan, btn);
+    });
+  });
+
   const nav = document.querySelector('.topnav') || document.querySelector('.nav');
   if (nav) {
     window.addEventListener('scroll', () => {
       nav.classList.toggle('is-scrolled', window.scrollY > 8);
     }, { passive: true });
   }
-
-  // —— Launch giveaway (Follow + RT on X) ——
-  const tw = String(cfg.twitter || 'RIFT_LOL_').replace(/^@/, '');
-  const followUrl = `https://x.com/intent/follow?screen_name=${encodeURIComponent(tw)}`;
-  const profileUrl = `https://x.com/${encodeURIComponent(tw)}`;
-  const postUrl = String(cfg.giveawayPost || '').trim() || profileUrl;
-  const winners = Number(cfg.giveawayWinners) || 8;
-  const announce = cfg.giveawayAnnounce || '25 Aug 2026';
-  const prize = cfg.giveawayPrize || 'Rift Premium';
-
-  const setText = (id, text) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = text;
-  };
-  setText('giveawayWinners', String(winners));
-  setText('giveawayWinnersMeta', String(winners));
-  setText('giveawayAnnounce', announce);
-  setText('giveawayPrize', prize);
-
-  const followLink = document.getElementById('gwFollowLink');
-  if (followLink) {
-    followLink.href = profileUrl;
-    followLink.textContent = `@${tw}`;
-  }
-  const openFollow = document.getElementById('gwOpenFollow');
-  if (openFollow) {
-    openFollow.href = followUrl;
-    openFollow.textContent = `Follow @${tw}`;
-  }
-
-  const followBox = document.getElementById('gwFollow');
-  const rtBox = document.getElementById('gwRt');
-  const enterBtn = document.getElementById('gwEnter');
-  const hint = document.getElementById('gwHint');
-
-  function syncGiveaway() {
-    const ready = !!(followBox && rtBox && followBox.checked && rtBox.checked);
-    if (enterBtn) enterBtn.disabled = !ready;
-    if (hint) {
-      hint.classList.toggle('is-ready', ready);
-      hint.textContent = ready
-        ? 'You’re set — open the post and make sure your RT is public.'
-        : 'Tick both boxes after you follow and RT, then open the post.';
-    }
-  }
-
-  if (followBox) followBox.addEventListener('change', syncGiveaway);
-  if (rtBox) rtBox.addEventListener('change', syncGiveaway);
-  if (enterBtn) {
-    enterBtn.addEventListener('click', () => {
-      if (enterBtn.disabled) return;
-      window.open(postUrl, '_blank', 'noopener,noreferrer');
-    });
-  }
-  syncGiveaway();
 })();

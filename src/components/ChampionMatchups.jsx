@@ -63,7 +63,7 @@ function MatchupCard({ row, tone, onClick, t }) {
   const delta = Number(row.delta) || 0;
   const sign = delta > 0 ? '+' : '';
   return (
-    <button type="button" className={`tld-mu-card is-${tone}`} onClick={onClick} title={row.champion}>
+    <button type="button" className={`tld-mu-card is-${tone}`} onClick={onClick} title={`${row.champion} — VODs`}>
       <div className="tld-mu-art">
         <MatchupPortrait name={row.champion} cid={row.cid} ddragonId={row.ddragonId} />
       </div>
@@ -138,15 +138,17 @@ export default function ChampionMatchups({
   const bad = useMemo(() => filterRows(activeMatchups.bad), [activeMatchups.bad, query]);
 
   const openChampion = (row) => {
-    if (!row?.champion) return;
-    const roleMap = { top: 'Top', jungle: 'Jungle', middle: 'Mid', bottom: 'ADC', support: 'Support' };
+    if (!row?.champion || !champion) return;
+    const roleMap = {
+      Top: 'top', Jungle: 'jungle', Mid: 'mid', ADC: 'bot', Support: 'support',
+    };
     const params = new URLSearchParams({
-      role: roleMap[row.lane] || role,
-      rank,
-      platform,
+      champion,
+      opponent: row.ddragonId || row.champion,
     });
-    if (patch) params.set('patch', patch);
-    navigate(`/tierlist/${encodeURIComponent(row.champion)}?${params.toString()}`);
+    const roleKey = roleMap[role] || '';
+    if (roleKey) params.set('role', roleKey);
+    navigate(`/matchups?${params.toString()}`);
   };
 
   const hasMatchups = useMemo(() => {

@@ -14,7 +14,30 @@ const ACCOUNT_TTL_MS = 30 * 60 * 1000;
 
 const leagueCache = new Map();
 const accountCache = new Map();
-const enrichCache = new Map();
+const identityCache = new Map();
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableRiot(err) {
+  const status = Number(err?.status) || 0;
+  return status === 429 || status === 503 || status === 502;
+}
+
+async function riotRetry(riotFetch, url, attempts = 4) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await riotFetch(url);
+    } catch (err) {
+      lastErr = err;
+      if (!isRetryableRiot(err) || i === attempts - 1) throw err;
+      await sleep(900 * (i + 1) + Math.floor(Math.random() * 200));
+    }
+  }
+  throw lastErr;
+}
 
 function accountHost(regionOrPlatform) {
   const value = String(regionOrPlatform || 'europe').toLowerCase();
@@ -146,64 +169,105 @@ async function loadLeagueEntries(riotFetch, tier, queue, platform) {
   return Array.isArray(data?.entries) ? data.entries : [];
 }
 
-async function getLeaderboard(riotFetch, { tier = 'challenger', platform = 'euw1' } = {}) {
+async function getLeaderboard(riotFetch, {
+  tier = 'challenger',
+  platform = 'euw1',
+  queue = 'soloq',
+} = {}) {
   const t = String(tier || 'challenger').toLowerCase();
   const plat = String(platform || 'euw1').toLowerCase();
   const region = matchRegionOf(plat);
-  const key = `${plat}:${t}`;
+  const qKey = String(queue || 'soloq').toLowerCase();
+  const riotQueue = qKey === 'flex' ? 'RANKED_FLEX_SR' : 'RANKED_SOLO_5x5';
+  const key = `${plat}:${t}:${riotQueue}`;
   const hit = leagueCache.get(key);
-  if (hit && Date.now() - hit.at < LEAGUE_TTL_MS) return hit.data;
+  if (hit && Date.now() - hit.at < (hit.ttl || LEAGUE_TTL_MS)) return hit.data;
 
-  const entries = await loadLeagueEntries(riotFetch, t, 'RANKED_SOLO_5x5', plat);
-  const top = [...entries]
-    .sort((a, b) => (b.leaguePoints || 0) - (a.leaguePoints || 0))
-    .slice(0, LEADERBOARD_LIMIT);
+  const entries = await loadLeagueEntries(riotFetch, t, riotQueue, plat);
+  const ladder = [...entries].sort((a, b) => (b.leaguePoints || 0) - (a.leaguePoints || 0));
+  // Only the visible slice gets enriched: each row costs an account + summoner call.
+  const top = ladder.slice(0, LEADERBOARD_LIMIT);
+  const accountHost = region === 'sea' ? 'asia' : region;
 
-  const enrichKey = `${key}:names`;
-  let names = enrichCache.get(enrichKey);
-  if (!names || Date.now() - names.at > LEAGUE_TTL_MS) {
-    const accounts = await mapWithConcurrency(top, 5, async (row) => {
-      if (!row.puuid) return null;
-      try {
-        return await riotFetch(`https://${region === 'sea' ? 'asia' : region}.api.riotgames.com/riot/account/v1/accounts/by-puuid/${row.puuid}`);
-      } catch {
-        return null;
-      }
-    });
-    const summoners = await mapWithConcurrency(top, 5, async (row) => {
-      if (!row.puuid) return null;
-      try {
-        return await riotFetch(`https://${plat}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${row.puuid}`);
-      } catch {
-        return null;
-      }
-    });
-    names = {
-      at: Date.now(),
-      accounts,
-      summoners,
-    };
-    enrichCache.set(enrichKey, names);
-  }
+  // Names first (account-v1), then icons (summoner-v4). Bursting both at once
+  // trips the 20 req/s personal-key cap around row 20 and those names stay Unknown.
+  const identities = top.map((row) => {
+    if (!row.puuid) return { gameName: null, tagLine: '', profileIconId: null };
+    const cached = identityCache.get(row.puuid);
+    if (cached && Date.now() - cached.at < ACCOUNT_TTL_MS) return { ...cached };
+    return { gameName: null, tagLine: '', profileIconId: null };
+  });
+
+  await mapWithConcurrency(top, 2, async (row, i) => {
+    if (!row.puuid || identities[i].gameName) return;
+    try {
+      const account = await riotRetry(
+        riotFetch,
+        `https://${accountHost}.api.riotgames.com/riot/account/v1/accounts/by-puuid/${row.puuid}`
+      );
+      identities[i].gameName = account?.gameName || null;
+      identities[i].tagLine = account?.tagLine || '';
+    } catch { /* leave unknown; retry next refresh */ }
+  });
+
+  await mapWithConcurrency(top, 2, async (row, i) => {
+    if (!row.puuid) return;
+    if (identities[i].profileIconId) return;
+    try {
+      const summoner = await riotRetry(
+        riotFetch,
+        `https://${plat}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${row.puuid}`
+      );
+      identities[i].profileIconId = summoner?.profileIconId || null;
+    } catch { /* icon is optional */ }
+  });
+
+  identities.forEach((id, i) => {
+    if (!id.gameName || !top[i]?.puuid) return;
+    identityCache.set(top[i].puuid, { ...id, at: Date.now() });
+  });
 
   const rows = top.map((e, i) => {
-    const account = names.accounts[i];
-    const summoner = names.summoners[i];
+    const id = identities[i] || {};
     return {
       rank: i + 1,
       puuid: e.puuid,
-      gameName: account?.gameName || 'Unknown',
-      tagLine: account?.tagLine || '',
-      summonerName: account ? `${account.gameName}#${account.tagLine}` : (e.puuid || 'Unknown').slice(0, 8),
-      profileIconId: summoner?.profileIconId || null,
+      gameName: id.gameName || e.riotIdGameName || e.summonerName || 'Unknown',
+      tagLine: id.tagLine || e.riotIdTagline || '',
+      summonerName: id.gameName
+        ? `${id.gameName}#${id.tagLine}`
+        : (e.puuid || 'Unknown').slice(0, 8),
+      profileIconId: id.profileIconId || null,
       lp: e.leaguePoints || 0,
       wins: e.wins || 0,
       losses: e.losses || 0,
+      hotStreak: !!e.hotStreak,
+      veteran: !!e.veteran,
+      freshBlood: !!e.freshBlood,
+      inactive: !!e.inactive,
     };
   });
 
-  const payload = { tier: t, platform: plat, region, builtAt: Date.now(), entries: rows };
-  leagueCache.set(key, { at: Date.now(), data: payload });
+  const unknown = rows.filter((r) => r.gameName === 'Unknown').length;
+  const payload = {
+    tier: t,
+    mode: qKey === 'flex' ? 'flex' : 'soloq',
+    queue: riotQueue,
+    platform: plat,
+    region,
+    builtAt: Date.now(),
+    // The ladder is far larger than the enriched slice; the UI says so rather than implying 50 is all of it.
+    limit: LEADERBOARD_LIMIT,
+    totalEntries: ladder.length,
+    cutoffLp: ladder.length ? (ladder[ladder.length - 1].leaguePoints || 0) : null,
+    entries: rows,
+  };
+  // Don't pin a half-named ladder in cache — the next refresh can fill holes.
+  leagueCache.set(key, {
+    at: Date.now(),
+    data: payload,
+    ttl: unknown > 5 ? 30 * 1000 : LEAGUE_TTL_MS,
+  });
   return payload;
 }
 
@@ -221,14 +285,28 @@ function registerWebApi(router) {
   router.get('/v1/web/tierlist', async (req, url) => {
     const platform = url.searchParams.get('platform') || 'euw1';
     const rank = url.searchParams.get('rank') || 'master';
+    const timeframe = url.searchParams.get('timeframe') || undefined;
     const force = url.searchParams.get('force') === '1';
-    return getTierList({ platform, rank, force });
+    return getTierList({ platform, rank, timeframe, force });
   });
 
   router.get('/v1/web/leaderboard', async (req, url, riotFetch) => {
     const tier = url.searchParams.get('tier') || 'challenger';
     const platform = url.searchParams.get('platform') || 'euw1';
-    return getLeaderboard(riotFetch, { tier, platform });
+    const mode = String(url.searchParams.get('mode') || url.searchParams.get('queue') || 'soloq').toLowerCase();
+    if (mode === 'aram') {
+      return {
+        mode: 'aram',
+        tier,
+        platform,
+        ok: false,
+        roadmap: true,
+        error: 'ARAM player ladder is on the roadmap. Champion grades are live on the ARAM tier list.',
+        entries: [],
+      };
+    }
+    const queue = mode === 'flex' ? 'flex' : 'soloq';
+    return getLeaderboard(riotFetch, { tier, platform, queue });
   });
 
   router.get('/v1/web/champion', async (req, url) => {
@@ -260,6 +338,12 @@ function registerWebApi(router) {
   });
 
   const { getDashboard, getLiveGame, getMatchTimelineDetails, getCareerSidebar } = require('./dashboard');
+  const { getStudioMeta } = require('./studio');
+  const { listPros, getPro, lookupPro } = require('./pros');
+  const { getSynergy } = require('./synergy');
+  const { getArena } = require('./arena');
+  const { getAram } = require('./aram');
+  const { getOtps } = require('./otps');
 
   router.get('/v1/web/dashboard', async (req, url, riotFetch) => {
     const gameName = url.searchParams.get('gameName') || url.searchParams.get('name') || '';
@@ -295,6 +379,105 @@ function registerWebApi(router) {
     const region = clip(url.searchParams.get('region') || 'europe', 16) || 'europe';
     const puuid = clip(url.searchParams.get('puuid') || '', 128);
     return getMatchTimelineDetails(riotFetch, { matchId, region, puuid });
+  });
+
+  router.get('/v1/web/studio', async (req, url) => {
+    const view = clip(url.searchParams.get('view') || 'home', 40) || 'home';
+    const platform = clip(url.searchParams.get('platform') || 'euw1', 12) || 'euw1';
+    const queue = url.searchParams.get('queue') || '420';
+    const role = clip(url.searchParams.get('role') || '', 24);
+    const tier = clip(url.searchParams.get('tier') || 'emerald_plus', 32) || 'emerald_plus';
+    const timeframe = clip(url.searchParams.get('timeframe') || '30days', 24) || '30days';
+    const dimension = clip(url.searchParams.get('dimension') || 'champion', 24) || 'champion';
+    return getStudioMeta({
+      view,
+      platform,
+      queue,
+      role,
+      tier,
+      timeframe,
+      dimension,
+    });
+  });
+
+  router.get('/v1/web/pros', async (req, url) => {
+    const country = clip(url.searchParams.get('country') || '', 8);
+    const lane = clip(url.searchParams.get('lane') || '', 24);
+    const league = clip(url.searchParams.get('league') || '', 64);
+    const query = clip(url.searchParams.get('query') || '', 80);
+    return listPros({ country, lane, league, query });
+  });
+
+  router.get('/v1/web/pros/player', async (req, url) => {
+    const slug = clip(url.searchParams.get('slug') || url.searchParams.get('p') || '', 80);
+    return getPro(slug);
+  });
+
+  router.get('/v1/web/pros/lookup', async (req, url) => {
+    const riotId = clip(url.searchParams.get('riotId') || '', 80);
+    return lookupPro(riotId);
+  });
+
+  router.get('/v1/web/synergy', async (req, url) => {
+    const platform = clip(url.searchParams.get('platform') || 'euw1', 12) || 'euw1';
+    const rank = clip(url.searchParams.get('rank') || 'master', 32) || 'master';
+    const role1 = clip(url.searchParams.get('role1') || 'ADC', 24) || 'ADC';
+    const role2 = clip(url.searchParams.get('role2') || 'Support', 24) || 'Support';
+    const duoType = clip(url.searchParams.get('duoType') || '', 40);
+    const timeframe = clip(url.searchParams.get('timeframe') || '30days', 24) || '30days';
+    const minRaw = url.searchParams.get('minGames');
+    const minGames = minRaw != null && minRaw !== '' ? Number(minRaw) : undefined;
+    return getSynergy({
+      platform,
+      rank,
+      role1,
+      role2,
+      duoType,
+      timeframe,
+      minGames,
+    });
+  });
+
+  router.get('/v1/web/arena', async (req, url) => {
+    const platform = clip(url.searchParams.get('platform') || 'euw1', 12) || 'euw1';
+    const rank = clip(url.searchParams.get('rank') || 'emerald_plus', 32) || 'emerald_plus';
+    const region = clip(url.searchParams.get('region') || 'all', 16) || 'all';
+    return getArena({ platform, rank, region });
+  });
+
+  router.get('/v1/web/aram', async (req, url) => {
+    const platform = clip(url.searchParams.get('platform') || 'euw1', 12) || 'euw1';
+    const rank = clip(url.searchParams.get('rank') || 'emerald_plus', 32) || 'emerald_plus';
+    const region = clip(url.searchParams.get('region') || 'all', 16) || 'all';
+    return getAram({ platform, rank, region });
+  });
+
+  router.get('/v1/web/otps', async (req, url) => {
+    const platform = clip(url.searchParams.get('platform') || 'all', 12) || 'all';
+    const lane = clip(url.searchParams.get('lane') || 'all', 16) || 'all';
+    const page = Number(url.searchParams.get('page') || 1) || 1;
+    const allPages = url.searchParams.get('all') === '1' || url.searchParams.get('all') === 'true';
+    return getOtps({ platform, lane, page, allPages });
+  });
+
+  const { getScouting } = require('./scouting');
+  router.get('/v1/web/scouting', async (req, url) => {
+    const platform = clip(url.searchParams.get('platform') || 'euw1', 12) || 'euw1';
+    const lane = clip(url.searchParams.get('lane') || 'all', 16) || 'all';
+    const minLp = Number(url.searchParams.get('minLp') || url.searchParams.get('lp') || 500);
+    const sort = clip(url.searchParams.get('sort') || 'kda', 32) || 'kda';
+    const dir = clip(url.searchParams.get('dir') || 'desc', 8) || 'desc';
+    const q = clip(url.searchParams.get('q') || '', 64);
+    const limit = Number(url.searchParams.get('limit') || 250) || 250;
+    return getScouting({ platform, lane, minLp, sort, dir, q, limit });
+  });
+
+  const premium = require('./premium');
+  router.get('/v1/web/premium/checkout', async (req, url) => {
+    const plan = clip(url.searchParams.get('plan') || 'six', 12) || 'six';
+    const deviceId = clip(url.searchParams.get('deviceId') || `web-${Date.now()}`, 200);
+    const riotId = clip(url.searchParams.get('riotId') || '', 80);
+    return premium.createCheckoutSession({ plan, deviceId, riotId }, req);
   });
 }
 

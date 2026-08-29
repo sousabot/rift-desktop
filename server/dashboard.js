@@ -266,6 +266,8 @@ async function fetchOpggProfileExtras(platform, riotId) {
       solo: fromStat(soloStat) || soloFromSearch,
       flex: fromStat(flexStat),
       lpDelta30d,
+      // Newest 80 points of the elo/LP curve for the profile progression chart.
+      lpHistory: rows.slice(-80),
     };
   } catch {
     return null;
@@ -1267,6 +1269,7 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
     losses: headerRank.losses,
     solo: soloRanked,
     flex: flexRanked,
+    lpHistory: opgg?.lpHistory || [],
     seasonPeak: null,
     overview,
     championPool,

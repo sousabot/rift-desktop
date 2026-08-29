@@ -118,6 +118,7 @@ function ScoutMiniCard({ player, selected, onSelect, t }) {
     <button
       type="button"
       className={`ov-scout-card${selected ? ' is-on' : ''}${player.isSelf ? ' is-self' : ''}`}
+      onPointerDown={(e) => e.stopPropagation()}
       onClick={() => onSelect?.(player)}
     >
       <img className="ov-scout-splash" src={champSplashUrl(player.champion)} alt="" />

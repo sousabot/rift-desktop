@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 const { DEFAULT_PROXY, normalizeEnv, apiUrl, appToken, useLocalKey } = require('./rift-env');
+const { safeRegister } = require('./ipc-handle');
 const idCache = require('./id-cache');
 const matchCache = require('./match-cache');
 
@@ -57,6 +58,8 @@ function applyEnvFile(filePath) {
       || key === 'PREMIUM_LICENSE_SECRET'
       || key === 'PREMIUM_GIFT_CODES'
       || key === 'STRIPE_PUBLIC_URL'
+      || key === 'TWITCH_CLIENT_ID'
+      || key === 'TWITCH_CLIENT_SECRET'
       || !process.env[key]
     ) {
       process.env[key] = value;
@@ -581,8 +584,9 @@ module.exports = function registerRiotHandlers(ipcMain) {
     }, LAST_MATCH_TTL_MS)
   );
 
-  require('./tierlist')(ipcMain);
-  require('./lens-benchmarks')(ipcMain, {
+  safeRegister('tierlist', () => require('./tierlist')(ipcMain));
+  safeRegister('tft-comps', () => require('./tft-comps')(ipcMain));
+  safeRegister('lens-benchmarks', () => require('./lens-benchmarks')(ipcMain, {
     riotFetch,
     mapWithConcurrency,
     matchRegionOf: (platform) => PLATFORM_TO_MATCH_REGION[platform] || 'europe',
@@ -596,9 +600,9 @@ module.exports = function registerRiotHandlers(ipcMain) {
       if (!bag) matchCache.writeCache(cache);
       return data;
     },
-  });
-  require('./studio-meta')(ipcMain);
-  require('./feedback-ipc')(ipcMain);
+  }));
+  safeRegister('studio-meta', () => require('./studio-meta')(ipcMain));
+  safeRegister('feedback-ipc', () => require('./feedback-ipc')(ipcMain));
 };
 
 module.exports.riotFetch = riotFetch;

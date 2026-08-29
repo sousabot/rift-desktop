@@ -298,13 +298,36 @@ function recorderEventsFromRaw(raw, youRow, active) {
   const out = [];
   for (const ev of events) {
     const name = ev.EventName;
-    if (name === 'ChampionKill' && nameMatches(ev.KillerName, you)) {
-      out.push({
-        id: ev.EventID,
-        type: 'kill',
-        label: ev.VictimName ? `Kill · ${shortName(ev.VictimName)}` : 'Kill',
-        time: ev.EventTime || 0,
-      });
+    if (name === 'ChampionKill') {
+      const victim = ev.VictimName ? shortName(ev.VictimName) : '';
+      if (nameMatches(ev.VictimName, you)) {
+        const killer = ev.KillerName ? shortName(ev.KillerName) : '';
+        out.push({
+          id: `d-${ev.EventID}`,
+          type: 'death',
+          label: killer ? `Death · ${killer}` : 'Death',
+          time: ev.EventTime || 0,
+        });
+        continue;
+      }
+      if (nameMatches(ev.KillerName, you)) {
+        out.push({
+          id: ev.EventID,
+          type: 'kill',
+          label: victim ? `Kill · ${victim}` : 'Kill',
+          time: ev.EventTime || 0,
+        });
+        continue;
+      }
+      const assisters = Array.isArray(ev.Assisters) ? ev.Assisters : [];
+      if (assisters.some((a) => nameMatches(a, you))) {
+        out.push({
+          id: `a-${ev.EventID}`,
+          type: 'assist',
+          label: victim ? `Assist · ${victim}` : 'Assist',
+          time: ev.EventTime || 0,
+        });
+      }
       continue;
     }
     if (name === 'Multikill') {
@@ -344,6 +367,17 @@ function recorderEventsFromRaw(raw, youRow, active) {
         id: ev.EventID,
         type: 'dragon',
         label: dragonClipLabel(ev),
+        time: ev.EventTime || 0,
+      });
+      continue;
+    }
+    if ((name === 'HeraldKill' || name === 'HordeKill') && involvedWithTeam(ev, team)) {
+      out.push({
+        id: ev.EventID,
+        type: name === 'HordeKill' ? 'grub' : 'herald',
+        label: name === 'HordeKill'
+          ? (ev.Stolen ? 'Grubs stolen' : 'Void grubs')
+          : (ev.Stolen ? 'Herald stolen' : 'Herald'),
         time: ev.EventTime || 0,
       });
       continue;

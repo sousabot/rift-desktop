@@ -119,7 +119,14 @@ async function proxyRiot(url) {
 async function serverRiotFetch(url) {
   const result = await proxyRiot(url);
   if (!result.ok) {
-    const err = new Error(`Riot API ${result.status} ${result.statusText}`);
+    const riotMsg = result?.data?.status?.message || '';
+    let message = `Riot API ${result.status} ${result.statusText}`;
+    if (result.status === 401 || /unknown apikey/i.test(riotMsg)) {
+      message = 'Riot API key is invalid or expired. Update RIOT_API_KEY in .env from https://developer.riotgames.com';
+    } else if (riotMsg) {
+      message = `Riot API ${result.status}: ${riotMsg}`;
+    }
+    const err = new Error(message);
     err.status = result.status;
     throw err;
   }

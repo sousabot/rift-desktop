@@ -144,14 +144,7 @@ function ChampionIcon({ name, size = 36, enemy = false, rounded = false, team })
       src={src}
       alt={name}
       title={name}
-      onError={() => {
-        const fallback = champIconUrl('Aatrox', version);
-        if (src === fallback) {
-          setFailed(true);
-          return;
-        }
-        setSrc(fallback);
-      }}
+      onError={() => setFailed(true)}
       className={`db-champ-icon${enemy ? ' db-champ-icon--enemy' : ''}${rounded ? ' db-champ-icon--rounded' : ''}${teamClass}`}
       style={{ width: size, height: size }}
     />
@@ -184,17 +177,25 @@ function ScoreRing({ label, value, max = 100, color, size = 40 }) {
 
 /* ─── LPRing (sidebar recent game badge) ───────────────────── */
 function LPRing({ lp, win }) {
-  const r = 10, circ = 2 * Math.PI * r;
-  const pct = Math.min(lp / 100, 1);
-  const c = win ? '#3ecf8e' : '#ff5c68';
+  const size = 36;
+  const stroke = 3;
+  const r = (size / 2) - stroke;
+  const circ = 2 * Math.PI * r;
+  const score = Math.max(0, Math.min(100, Number(lp) || 0));
+  const pct = score / 100;
   return (
-    <div className="db-lp-ring" title={`Rift Score ${lp}`}>
-      <svg width="28" height="28" viewBox="0 0 28 28">
-        <circle cx="14" cy="14" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="2.5" />
-        <circle cx="14" cy="14" r={r} fill="none" stroke={c} strokeWidth="2.5"
+    <div className={`db-lp-ring db-lp-ring--${win ? 'win' : 'loss'}`} title={`Rift Score ${score}`}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+        <circle className="db-lp-ring__track" cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} />
+        <circle
+          className="db-lp-ring__progress"
+          cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke}
           strokeDasharray={`${pct * circ} ${circ}`} strokeLinecap="round"
-          transform="rotate(-90 14 14)" />
-        <text x="14" y="18" textAnchor="middle" fill="#fff" fontSize="7" fontWeight="700">{lp}</text>
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+        <text className="db-lp-ring__value" x={size / 2} y={size / 2 + 4} textAnchor="middle">
+          {Math.round(score)}
+        </text>
       </svg>
     </div>
   );
@@ -789,7 +790,19 @@ export default function Dashboard() {
                   </button>
                 </article>
 
-                <article className="db-dpm-card db-card-soon">
+                <article
+                  className="db-dpm-card db-card-soon"
+                  role="link"
+                  tabIndex={0}
+                  onClick={() => navigate('/replays')}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      navigate('/replays');
+                    }
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
                   {lg && splashChamp && (
                     <img
                       src={loadingImg(splashChamp)}
@@ -800,9 +813,9 @@ export default function Dashboard() {
                   )}
                   <div className="db-card-soon-overlay" />
                   <div className="db-card-soon-body">
-                    <span className="db-card-soon-kicker">Replays · Soon</span>
-                    <h3>Paused for now</h3>
-                    <p>Capture fights Discord screenshare. Back when that’s fixed.</p>
+                    <span className="db-card-soon-kicker">{t('nav.replays')}</span>
+                    <h3>{t('replays.title')}</h3>
+                    <p>{t('replays.blurb')}</p>
                   </div>
                 </article>
 

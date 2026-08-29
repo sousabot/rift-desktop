@@ -10,9 +10,10 @@ const DEFAULT = {
   skill: { x: 18, y: 200 },
   winprob: { x: 18, y: 320 },
   scout: { x: 240, y: 40 },
+  tftComp: { x: 18, y: 400 },
 };
 
-const PANEL_IDS = new Set(['bench', 'items', 'obj', 'trinket', 'skill', 'winprob', 'scout']);
+const PANEL_IDS = new Set(['bench', 'items', 'obj', 'trinket', 'skill', 'winprob', 'scout', 'tftComp']);
 
 function filePath() {
   return path.join(app.getPath('userData'), 'overlay-pos.json');
@@ -34,6 +35,7 @@ function allDefaults() {
     skill: { ...DEFAULT.skill },
     winprob: { ...DEFAULT.winprob },
     scout: { ...DEFAULT.scout },
+    tftComp: { ...DEFAULT.tftComp },
   };
 }
 
@@ -55,6 +57,7 @@ function loadPos() {
       skill: point(raw?.skill, DEFAULT.skill),
       winprob: point(raw?.winprob, DEFAULT.winprob),
       scout: point(raw?.scout, DEFAULT.scout),
+      tftComp: point(raw?.tftComp, DEFAULT.tftComp),
     };
   } catch { /* first run */ }
   return allDefaults();
@@ -69,6 +72,7 @@ function savePos(pos) {
     skill: point(pos?.skill, DEFAULT.skill),
     winprob: point(pos?.winprob, DEFAULT.winprob),
     scout: point(pos?.scout, DEFAULT.scout),
+    tftComp: point(pos?.tftComp, DEFAULT.tftComp),
   };
   try { fs.writeFileSync(filePath(), JSON.stringify(next)); } catch { /* ignore */ }
   return next;

@@ -704,9 +704,42 @@ button.db-filter-label { cursor: pointer; font: inherit; }
   color: #ffd76b; font-size: 11px; font-weight: 800; cursor: pointer;
   text-transform: none; letter-spacing: 0;
 }
+.db-lp-ring {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(10, 12, 20, 0.45);
+}
+.db-lp-ring svg { display: block; overflow: visible; }
+.db-lp-ring__track { stroke: rgba(255, 255, 255, 0.1); }
+.db-lp-ring__value {
+  fill: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--rift-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.db-lp-ring--win .db-lp-ring__progress { stroke: #3ecf8e; }
+.db-lp-ring--loss .db-lp-ring__progress { stroke: #ff5c68; }
+
 .db-recent-list {
   display: flex; flex-direction: column; padding: 8px; gap: 6px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) rgba(255, 255, 255, 0.06);
+}
+.db-recent-list::-webkit-scrollbar { width: 6px; }
+.db-recent-list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  margin: 4px 0;
+}
+.db-recent-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
 }
 .db-recent-empty {
   padding: 18px 12px;
@@ -749,7 +782,6 @@ button.db-filter-label { cursor: pointer; font: inherit; }
 .db-recent-queue { font-size: 10px; color: var(--rift-text-faint); }
 .db-recent-kda { font-size: 13px; font-variant-numeric: tabular-nums; font-weight: 600; font-family: var(--rift-font-mono); }
 .db-recent-kdaval { font-size: 11px; color: var(--rift-text-muted); }
-.db-lp-ring { flex-shrink: 0; }
 
 @media (max-width: 1280px) {
   .db-cards { grid-template-columns: 1fr 1fr; grid-template-rows: none; }

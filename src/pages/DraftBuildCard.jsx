@@ -108,6 +108,7 @@ export default function DraftBuildCard({
                 key={row.id}
                 type="button"
                 className={`dr-meta-tab${on ? ' is-on' : ''}`}
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => setTab(row.id)}
               >
                 <span className="dr-meta-tab-items">

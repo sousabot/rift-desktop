@@ -12,30 +12,35 @@
       <a class="brand" href="./index.html"><span class="mark" aria-hidden="true"></span><strong>Rift.lol</strong></a>
       <div class="nav-links">
         <a href="./index.html">Home</a>
+        <a href="./app/">Stats</a>
         <a href="./roadmap.html">Roadmap</a>
         <a href="./terms.html">Terms</a>
       </div>
     </nav>
     <article class="legal">
       <h1>Privacy Policy</h1>
-      <p>Last updated: 14 August 2026</p>
-      <p>This policy describes how Rift.lol (“the app”) handles information when you use the Windows client.</p>
+      <p>Last updated: 29 August 2026</p>
+      <p>This policy covers the public Rift.lol website (stats, ladders, scouting, esports, and related pages) and the Windows desktop app.</p>
 
       <h2>What we collect</h2>
-      <p>The app asks you for a Riot ID (game name and tag) and a server hint so it can look up League of Legends data from the Riot Games API. That can include summoner profile, ranked record, match history, timelines, live-game participants, and champion mastery counts.</p>
-      <p>Optional feedback you submit (title, details, contact) is sent to our Discord webhook so we can fix bugs.</p>
+      <p>The website is built around looking up League of Legends players. Anyone can search a Riot ID, open a dashboard, browse a ladder, open a scouting row, or view an esports profile. Those requests use public Riot Games API data and public community sources for the name or roster you asked for. Searching someone does not link their account to you and does not require their password.</p>
+      <p>If you link your own Riot ID (game name, tag, and region) on the website or in the app, we use it the same way: to fetch summoner profile, ranked record, match history, timelines, live-game participants, and champion mastery.</p>
+      <p>Optional feedback (title, details, contact) may be sent to our Discord webhook so we can fix bugs.</p>
+      <p>Your browser may store a linked Riot ID, UI preferences (such as a country filter), and a random device id for checkout in local storage. We do not use tracking cookies for ads.</p>
 
       <h2>What we do not collect</h2>
-      <p>We do not ask for your Riot password. We do not sell player data. We do not run ads. We do not build a public database of other players beyond what you search inside your own copy of the app.</p>
+      <p>We do not ask for Riot passwords. We do not sell player data. We do not run ads. We do not keep a private dossier of every summoner on League — we request data when you (or another visitor) ask for it, and we cache some responses for a short time so the site stays fast.</p>
 
       <h2>Where data lives</h2>
-      <p>Linked-account settings and short-lived caches are stored on your PC (local app data). The Windows app does not embed a Riot API key. League data is requested through our HTTPS API proxy (hosted on Render), which holds the Riot key on the server, rate-limits requests, and only forwards calls to official Riot Games API hosts. We do not store your match history in our own database.</p>
+      <p>On the website, League data is requested through our HTTPS API (hosted on Render). That server holds the Riot key, rate-limits requests, and only forwards calls to official Riot Games API hosts and the public data sources the pages already show (for example community ladders used for scouting and esports). Short-lived caches may sit on that server so repeated views of the same ladder or profile are not refetched every time.</p>
+      <p>On the Windows app, linked-account settings and short-lived caches stay on your PC. The app does not embed a Riot API key.</p>
+      <p>We do not use match history as a marketing list. Premium checkout, if you use it, is handled by our payment provider; we receive the minimum we need to unlock Premium (such as a session or device id).</p>
 
       <h2>Third parties</h2>
-      <p>League data comes from Riot Games. Champion/item images may load from Riot’s Data Dragon / Community Dragon CDNs. Feedback may be delivered via Discord. Those services have their own policies.</p>
+      <p>League data comes from Riot Games. Champion, item, rank, and profile images may load from Riot’s Data Dragon / Community Dragon CDNs or similar public CDNs. Esports and scouting pages may use public community APIs. Feedback may be delivered via Discord. Payments go through our checkout provider. Those services have their own policies.</p>
 
       <h2>Contact</h2>
-      <p>Questions: use Report feedback / bugs in the app, or open an issue on the GitHub repository linked from the download page.</p>
+      <p>Questions about this policy: open an issue on the <a href="https://github.com/sousabot/rift-desktop">GitHub repository</a>, or use Report feedback / bugs in the Windows app if you have it installed.</p>
     </article>
   </div>
 </body>

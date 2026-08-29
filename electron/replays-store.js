@@ -2,10 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 
-const SETTINGS_REV = 2;
+const SETTINGS_REV = 3;
 
 const DEFAULT_SETTINGS = {
-  autoRecord: false,
+  autoRecord: true,
   clipKills: true,
   preSeconds: 8,
   postSeconds: 4,
@@ -56,7 +56,8 @@ function normalizeSettings(raw = {}) {
   const migrated = Number(raw.rev) >= SETTINGS_REV;
   return {
     rev: SETTINGS_REV,
-    autoRecord: migrated ? !!raw.autoRecord : false,
+    // Rev 3+: auto-record on by default (detect League/TFT and capture while the app is open).
+    autoRecord: migrated ? !!raw.autoRecord : true,
     clipKills: raw.clipKills !== false,
     preSeconds: Number(raw.preSeconds) > 0 ? Number(raw.preSeconds) : DEFAULT_SETTINGS.preSeconds,
     postSeconds: Number(raw.postSeconds) > 0 ? Number(raw.postSeconds) : DEFAULT_SETTINGS.postSeconds,

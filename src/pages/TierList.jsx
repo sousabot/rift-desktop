@@ -164,7 +164,7 @@ export default function TierList() {
       if (row.lowSample) return false;
       if (q && !String(row.champion).toLowerCase().includes(q)) return false;
       if (role !== 'all' && row.role !== role) return false;
-      if (!offMeta && row.lanePct < 12) return false;
+      if (!offMeta && (row.isPrimary === false || row.lanePct < 12)) return false;
       return true;
     });
     if (role === 'all') {
