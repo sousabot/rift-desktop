@@ -1,6 +1,7 @@
 /** Duo synergy tier list — DPM.lol duo + solo baselines (same source as dpm.lol/synergy). */
 
 const cloudscraper = require('cloudscraper');
+const { publicError, blockedError } = require('./safe-error');
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -67,20 +68,21 @@ function defaultMinGames(tier) {
 }
 
 async function fetchJson(url) {
-  const body = await cloudscraper.get({
-    uri: url,
-    headers: {
-      Accept: 'application/json',
-      Origin: 'https://dpm.lol',
-      Referer: 'https://dpm.lol/tierlist/synergy',
-    },
-  });
-  const text = String(body || '');
-  if (text.trimStart().startsWith('<')) {
-    const err = new Error('synergy blocked');
-    err.status = 403;
-    throw err;
+  let body;
+  try {
+    body = await cloudscraper.get({
+      uri: url,
+      headers: {
+        Accept: 'application/json',
+        Origin: 'https://dpm.lol',
+        Referer: 'https://dpm.lol/tierlist/synergy',
+      },
+    });
+  } catch {
+    throw blockedError('Synergy');
   }
+  const text = String(body || '');
+  if (text.trimStart().startsWith('<')) throw blockedError('Synergy');
   return JSON.parse(text);
 }
 
@@ -243,7 +245,7 @@ async function getSynergy({
     return payload;
   })().catch((err) => ({
     ok: false,
-    error: err.message || 'Could not load synergy list',
+    error: publicError(err, 'Could not load synergy list.'),
     rows: [],
     pairings: Object.entries(DUO_TYPES).map(([id, r]) => ({
       id,

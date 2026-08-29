@@ -11,6 +11,7 @@ const { URL } = require('url');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { normalizeEnv, appToken } = require('../electron/rift-env');
+const { publicError } = require('./safe-error');
 normalizeEnv();
 
 const PORT = Number(process.env.PORT) || 8787;
@@ -70,14 +71,6 @@ function readJson(req) {
     });
     req.on('error', reject);
   });
-}
-
-function publicError(err, fallback = 'Request failed. Try again in a moment.') {
-  const raw = String(err?.message || err || '');
-  if (!raw.trim()) return fallback;
-  if (/<!doctype|<html|just a moment|cloudflare|cf-chl|cf_chl|403\s*-/i.test(raw)) return fallback;
-  if (raw.length > 180) return fallback;
-  return raw;
 }
 
 function send(res, status, body) {

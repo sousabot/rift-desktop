@@ -1,6 +1,7 @@
-/** Scouting players — DPM.lol high-elo player metrics. */
+/** Scouting players — DPM.lol high-elo player metrics, Riot ladder fallback. */
 
 const cloudscraper = require('cloudscraper');
+const { publicError, blockedError } = require('./safe-error');
 
 const CACHE_TTL_MS = 45 * 60 * 1000;
 const PLATFORMS = new Set([
@@ -19,20 +20,21 @@ const inflight = new Map();
 let nameCache = null;
 
 async function fetchJson(url) {
-  const body = await cloudscraper.get({
-    uri: url,
-    headers: {
-      Accept: 'application/json',
-      Origin: 'https://dpm.lol',
-      Referer: 'https://dpm.lol/scouting/players',
-    },
-  });
-  const text = String(body || '');
-  if (text.trimStart().startsWith('<')) {
-    const err = new Error('Scouting feed blocked');
-    err.status = 403;
-    throw err;
+  let body;
+  try {
+    body = await cloudscraper.get({
+      uri: url,
+      headers: {
+        Accept: 'application/json',
+        Origin: 'https://dpm.lol',
+        Referer: 'https://dpm.lol/scouting/players',
+      },
+    });
+  } catch {
+    throw blockedError('Scouting');
   }
+  const text = String(body || '');
+  if (text.trimStart().startsWith('<')) throw blockedError('Scouting');
   return JSON.parse(text);
 }
 
@@ -107,7 +109,7 @@ function mapPlayer(row, names) {
     kills: Math.round((Number(row.kills) || 0) * 10) / 10,
     deaths: Math.round((Number(row.deaths) || 0) * 10) / 10,
     assists: Math.round((Number(row.assists) || 0) * 10) / 10,
-    kda: kdaOf(row),
+    kda: (row.kills == null && row.deaths == null && row.assists == null) ? null : kdaOf(row),
     goldDiffAt15: Math.round(Number(row.goldDiffAt15) || 0),
     csDiffAt15: Math.round((Number(row.csDiffAt15) || 0) * 10) / 10,
     killParticipation: Math.round((Number(row.killParticipation) || 0) * 10) / 10,
@@ -139,7 +141,7 @@ async function loadRaw(platform) {
       const url = `https://dpm.lol/v1/scouting/players?platform=${encodeURIComponent(platform)}`;
       const players = await fetchJson(url);
       const list = Array.isArray(players) ? players : [];
-      const payload = { at: Date.now(), list };
+      const payload = { at: Date.now(), list, source: 'dpm' };
       rawCache.set(key, payload);
       return payload;
     } finally {
@@ -151,6 +153,134 @@ async function loadRaw(platform) {
   return work;
 }
 
+async function leagueEntries(riotFetch, platform, tier) {
+  const data = await riotFetch(
+    `https://${platform}.api.riotgames.com/lol/league/v4/${tier}leagues/by-queue/RANKED_SOLO_5x5`
+  );
+  const entries = Array.isArray(data?.entries) ? data.entries : [];
+  return entries.map((e) => ({ ...e, tier: e.tier || String(tier).toUpperCase() }));
+}
+
+async function masterEntries(riotFetch, platform) {
+  const pages = [];
+  for (const page of [1, 2]) {
+    const rows = await riotFetch(
+      `https://${platform}.api.riotgames.com/lol/league-exp/v4/entries/RANKED_SOLO_5x5/MASTER/I?page=${page}`
+    );
+    if (!Array.isArray(rows) || !rows.length) break;
+    pages.push(...rows);
+  }
+  return pages;
+}
+
+function riotToRaw(e, platform) {
+  const wins = Number(e.wins) || 0;
+  const losses = Number(e.losses) || 0;
+  const games = wins + losses;
+  const gameName = e.riotIdGameName || e.summonerName || '';
+  const tagLine = e.riotIdTagline || '';
+  return {
+    puuid: e.puuid || '',
+    gameName: gameName || (e.puuid ? String(e.puuid).slice(0, 8) : 'Unknown'),
+    tagLine,
+    displayName: gameName || '',
+    profileIcon: 0,
+    platform,
+    tier: e.tier || '',
+    rank: e.rank || 'I',
+    leaguePoints: Number(e.leaguePoints) || 0,
+    lane: '',
+    summonerLevel: 0,
+    games,
+    winrate: games ? Math.round((100 * wins / games) * 10) / 10 : 0,
+    kills: null,
+    deaths: null,
+    assists: null,
+    championIds: [],
+  };
+}
+
+async function loadRiotLadder(riotFetch, platform) {
+  const results = await Promise.allSettled([
+    leagueEntries(riotFetch, platform, 'challenger'),
+    leagueEntries(riotFetch, platform, 'grandmaster'),
+    masterEntries(riotFetch, platform),
+  ]);
+  const seen = new Set();
+  const list = [];
+  for (const result of results) {
+    if (result.status !== 'fulfilled') continue;
+    for (const e of result.value) {
+      const id = e.puuid || `${e.summonerId || ''}:${e.leaguePoints}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      list.push(riotToRaw(e, platform));
+    }
+  }
+  if (!list.length) throw new Error('Could not load scouting players.');
+  return { at: Date.now(), list, source: 'riot' };
+}
+
+function buildScouting({
+  raw,
+  names,
+  plat,
+  roleLane,
+  lpFloor,
+  sortKey,
+  descending,
+  query,
+  max,
+  source,
+}) {
+  let rows = raw.list;
+  const slim = source === 'riot';
+  const effectiveSort = slim && !['lp', 'games', 'winrate'].includes(sortKey) ? 'lp' : sortKey;
+  let laneIgnored = false;
+
+  if (lpFloor > 0) {
+    rows = rows.filter((p) => (Number(p.leaguePoints) || 0) >= lpFloor);
+  }
+  if (roleLane) {
+    if (slim) laneIgnored = true;
+    else rows = rows.filter((p) => String(p.lane || '').toUpperCase() === roleLane);
+  }
+  if (query) {
+    rows = rows.filter((p) => {
+      const name = `${p.gameName || ''}#${p.tagLine || ''} ${p.displayName || ''}`.toLowerCase();
+      return name.includes(query);
+    });
+  }
+
+  const mapped = rows.map((row) => mapPlayer(row, names));
+  mapped.sort((a, b) => {
+    const av = sortValue(a, effectiveSort);
+    const bv = sortValue(b, effectiveSort);
+    if (bv === av) return b.lp - a.lp;
+    return descending ? (bv - av) : (av - bv);
+  });
+
+  const entries = mapped.slice(0, max).map((row, i) => ({ ...row, rank: i + 1 }));
+  return {
+    ok: true,
+    source,
+    note: slim
+      ? 'Showing the ranked ladder — combat stats and lane filter are temporarily unavailable.'
+      : undefined,
+    laneIgnored,
+    platform: plat,
+    lane: roleLane || 'all',
+    minLp: lpFloor,
+    sort: effectiveSort,
+    dir: descending ? 'desc' : 'asc',
+    total: raw.list.length,
+    matched: mapped.length,
+    updatedAt: raw.at,
+    ddragonVersion: names.version || '',
+    entries,
+  };
+}
+
 async function getScouting({
   platform = 'euw1',
   lane = 'all',
@@ -159,6 +289,7 @@ async function getScouting({
   dir = 'desc',
   q = '',
   limit = 200,
+  riotFetch,
 } = {}) {
   const plat = normalizePlatform(platform);
   const roleLane = normalizeLane(lane);
@@ -167,52 +298,25 @@ async function getScouting({
   const descending = String(dir || 'desc').toLowerCase() !== 'asc';
   const query = String(q || '').trim().toLowerCase();
   const max = Math.max(20, Math.min(500, Number(limit) || 200));
+  const names = await loadChampionNames();
 
   try {
-    const [raw, names] = await Promise.all([loadRaw(plat), loadChampionNames()]);
-    let rows = raw.list;
-
-    if (lpFloor > 0) {
-      rows = rows.filter((p) => (Number(p.leaguePoints) || 0) >= lpFloor);
-    }
-    if (roleLane) {
-      rows = rows.filter((p) => String(p.lane || '').toUpperCase() === roleLane);
-    }
-    if (query) {
-      rows = rows.filter((p) => {
-        const name = `${p.gameName || ''}#${p.tagLine || ''} ${p.displayName || ''}`.toLowerCase();
-        return name.includes(query);
-      });
-    }
-
-    const mapped = rows.map((row) => mapPlayer(row, names));
-    mapped.sort((a, b) => {
-      const av = sortValue(a, sortKey);
-      const bv = sortValue(b, sortKey);
-      if (bv === av) return b.lp - a.lp;
-      return descending ? (bv - av) : (av - bv);
+    const raw = await loadRaw(plat);
+    return buildScouting({
+      raw, names, plat, roleLane, lpFloor, sortKey, descending, query, max, source: 'dpm',
     });
-
-    const entries = mapped.slice(0, max).map((row, i) => ({ ...row, rank: i + 1 }));
-
-    return {
-      ok: true,
-      source: 'dpm',
-      platform: plat,
-      lane: roleLane || 'all',
-      minLp: lpFloor,
-      sort: sortKey,
-      dir: descending ? 'desc' : 'asc',
-      total: raw.list.length,
-      matched: mapped.length,
-      updatedAt: raw.at,
-      ddragonVersion: names.version || '',
-      entries,
-    };
-  } catch (err) {
+  } catch (dpmErr) {
+    if (typeof riotFetch === 'function') {
+      try {
+        const raw = await loadRiotLadder(riotFetch, plat);
+        return buildScouting({
+          raw, names, plat, roleLane, lpFloor, sortKey, descending, query, max, source: 'riot',
+        });
+      } catch { /* fall through to sanitized error */ }
+    }
     return {
       ok: false,
-      error: err.message || 'Could not load scouting players',
+      error: publicError(dpmErr, 'Could not load scouting players.'),
       entries: [],
       matched: 0,
       total: 0,

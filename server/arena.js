@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { publicError } = require('./safe-error');
 
 const TTL_MS = 6 * 60 * 60 * 1000;
 const TIER_LABEL = [
@@ -251,9 +252,9 @@ async function getArena({ platform = 'euw1', rank = 'emerald_plus', region = 'al
       return data;
     } catch (err) {
       if (cached?.data?.rows?.length) {
-        return { ...cached.data, stale: true, error: err.message };
+        return { ...cached.data, stale: true, error: publicError(err, 'Could not refresh arena list.') };
       }
-      return { ok: false, error: err.message || 'Could not load arena list', rows: [] };
+      return { ok: false, error: publicError(err, 'Could not load arena list.'), rows: [] };
     }
   })().finally(() => inflight.delete(key));
 

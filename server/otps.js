@@ -1,6 +1,7 @@
 /** OTP (one-trick) leaderboard — DPM.lol champions ladder. */
 
 const cloudscraper = require('cloudscraper');
+const { publicError, blockedError } = require('./safe-error');
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const LANES = new Set(['top', 'jungle', 'middle', 'bottom', 'utility']);
@@ -14,20 +15,21 @@ const inflight = new Map();
 let nameCache = null;
 
 async function fetchJson(url) {
-  const body = await cloudscraper.get({
-    uri: url,
-    headers: {
-      Accept: 'application/json',
-      Origin: 'https://dpm.lol',
-      Referer: 'https://dpm.lol/leaderboards/otps',
-    },
-  });
-  const text = String(body || '');
-  if (text.trimStart().startsWith('<')) {
-    const err = new Error('OTP leaderboard blocked');
-    err.status = 403;
-    throw err;
+  let body;
+  try {
+    body = await cloudscraper.get({
+      uri: url,
+      headers: {
+        Accept: 'application/json',
+        Origin: 'https://dpm.lol',
+        Referer: 'https://dpm.lol/leaderboards/otps',
+      },
+    });
+  } catch {
+    throw blockedError('OTP leaderboard');
   }
+  const text = String(body || '');
+  if (text.trimStart().startsWith('<')) throw blockedError('OTP leaderboard');
   return JSON.parse(text);
 }
 
@@ -176,7 +178,7 @@ async function getOtps({
     } catch (err) {
       return {
         ok: false,
-        error: err.message || 'Could not load OTP leaderboard',
+        error: publicError(err, 'Could not load OTP leaderboard.'),
         entries: [],
         total: 0,
       };

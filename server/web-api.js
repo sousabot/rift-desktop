@@ -461,7 +461,7 @@ function registerWebApi(router) {
   });
 
   const { getScouting } = require('./scouting');
-  router.get('/v1/web/scouting', async (req, url) => {
+  router.get('/v1/web/scouting', async (req, url, riotFetch) => {
     const platform = clip(url.searchParams.get('platform') || 'euw1', 12) || 'euw1';
     const lane = clip(url.searchParams.get('lane') || 'all', 16) || 'all';
     const minLp = Number(url.searchParams.get('minLp') || url.searchParams.get('lp') || 500);
@@ -469,7 +469,7 @@ function registerWebApi(router) {
     const dir = clip(url.searchParams.get('dir') || 'desc', 8) || 'desc';
     const q = clip(url.searchParams.get('q') || '', 64);
     const limit = Number(url.searchParams.get('limit') || 250) || 250;
-    return getScouting({ platform, lane, minLp, sort, dir, q, limit });
+    return getScouting({ platform, lane, minLp, sort, dir, q, limit, riotFetch });
   });
 
   const premium = require('./premium');

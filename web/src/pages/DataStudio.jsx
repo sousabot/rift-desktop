@@ -223,7 +223,7 @@ function HomeGlyph({ id }) {
   }
 }
 
-function MiniRankChart({ rows }) {
+function MiniRankChart({ rows, unavailable }) {
   const groups = TIER_ORDER.map((tier) => {
     const players = (rows || [])
       .filter((r) => r.tier === tier)
@@ -231,7 +231,13 @@ function MiniRankChart({ rows }) {
     return { tier, players, color: RANK_COLORS[tier] || '#9aa4d6' };
   }).filter((g) => g.players > 0);
   const max = Math.max(1, ...groups.map((g) => g.players));
-  if (!groups.length) return <div className="st-home-empty-preview" />;
+  if (!groups.length) {
+    return (
+      <div className={`st-home-empty-preview${unavailable ? ' is-msg' : ''}`}>
+        {unavailable ? t('studio.feedUnavailable') : ''}
+      </div>
+    );
+  }
   return (
     <div className="st-home-mini-ranks" aria-hidden>
       {groups.map((g) => (
@@ -248,10 +254,16 @@ function MiniRankChart({ rows }) {
   );
 }
 
-function MiniIconsPreview({ rows }) {
+function MiniIconsPreview({ rows, unavailable }) {
   const version = useDdragonVersion();
   const top = (rows || []).slice(0, 8);
-  if (!top.length) return <div className="st-home-empty-preview" />;
+  if (!top.length) {
+    return (
+      <div className={`st-home-empty-preview${unavailable ? ' is-msg' : ''}`}>
+        {unavailable ? t('studio.feedUnavailable') : ''}
+      </div>
+    );
+  }
   return (
     <div className="st-home-mini-icons" aria-hidden>
       {top.map((row) => {
@@ -263,7 +275,7 @@ function MiniIconsPreview({ rows }) {
   );
 }
 
-function StudioHome({ t, onOpen, iconRows, rankRows }) {
+function StudioHome({ t, onOpen, iconRows, rankRows, iconsUnavailable, ranksUnavailable }) {
   const labelFor = (id) => {
     for (const block of NAV) {
       for (const item of block.items || []) {
@@ -296,8 +308,8 @@ function StudioHome({ t, onOpen, iconRows, rankRows }) {
                     <span>{t(card.hintKey)}</span>
                   </div>
                   {card.kind === 'icons'
-                    ? <MiniIconsPreview rows={iconRows} />
-                    : <MiniRankChart rows={rankRows} />}
+                    ? <MiniIconsPreview rows={iconRows} unavailable={iconsUnavailable} />
+                    : <MiniRankChart rows={rankRows} unavailable={ranksUnavailable} />}
                 </button>
               ))}
             </div>
@@ -953,6 +965,8 @@ export default function DataStudio() {
         onOpen={setView}
         iconRows={homeIcons.rows}
         rankRows={summary.distribution?.rows || []}
+        iconsUnavailable={!homeIcons.loading && (!!homeIcons.error || !homeIcons.rows.length)}
+        ranksUnavailable={!summary.loading && (!!summary.error || !(summary.distribution?.rows || []).length)}
       />
     );
   } else if (isSoon) {

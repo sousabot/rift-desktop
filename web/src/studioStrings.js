@@ -14,6 +14,7 @@ const MESSAGES = {
   'studio.needAccount': 'Link a Riot ID so Data Studio knows which platform/region to query.',
   'studio.metaSoon': 'This view is not in the meta feed yet.',
   'studio.noData': 'No rows in this table yet.',
+  'studio.feedUnavailable': 'Unavailable',
   'studio.queue': 'Queue',
   'studio.searchChamp': 'Search for a champion',
   'studio.searchIcon': 'Search for a profile icon',

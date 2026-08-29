@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { publicError } = require('./safe-error');
 
 const TTL_MS = 6 * 60 * 60 * 1000;
 const QUEUE_ARAM = 450;
@@ -249,9 +250,9 @@ async function getAram({ platform = 'euw1', rank = 'emerald_plus', region = 'all
       return data;
     } catch (err) {
       if (cached?.data?.rows?.length) {
-        return { ...cached.data, stale: true, error: err.message };
+        return { ...cached.data, stale: true, error: publicError(err, 'Could not refresh ARAM list.') };
       }
-      return { ok: false, error: err.message || 'Could not load aram list', rows: [] };
+      return { ok: false, error: publicError(err, 'Could not load ARAM list.'), rows: [] };
     }
   })().finally(() => inflight.delete(key));
 

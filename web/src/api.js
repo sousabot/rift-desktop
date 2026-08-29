@@ -52,7 +52,7 @@ function isRiotBacked(path) {
   return RIOT_BACKED.some((prefix) => p === prefix || p.startsWith(`${prefix}/`));
 }
 
-function publicError(raw, fallback = 'Request failed. Try again in a moment.') {
+export function publicError(raw, fallback = 'Request failed. Try again in a moment.') {
   const text = String(raw || '').trim();
   if (!text) return fallback;
   if (/<!doctype|<html|just a moment|cloudflare|cf-chl|cf_chl|403\s*-/i.test(text)) return fallback;
@@ -60,12 +60,17 @@ function publicError(raw, fallback = 'Request failed. Try again in a moment.') {
   return text;
 }
 
+function sanitizePayload(body) {
+  if (!body || typeof body !== 'object' || body.error == null) return body;
+  return { ...body, error: publicError(body.error, 'Could not load this right now.') };
+}
+
 async function fetchApi(base, path, { timeoutMs = 45000 } = {}) {
   const res = await fetch(`${base}${path}`, {
     headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(timeoutMs),
   });
-  const body = await res.json().catch(() => ({}));
+  const body = sanitizePayload(await res.json().catch(() => ({})));
   if (!res.ok) {
     const err = new Error(publicError(body.error, `Could not load this right now (${res.status}).`));
     err.status = res.status;

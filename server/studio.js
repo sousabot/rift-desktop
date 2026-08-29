@@ -1,6 +1,7 @@
 /** Public Data Studio proxy — same DPM.lol studio feed as the desktop app. */
 
 const cloudscraper = require('cloudscraper');
+const { publicError, blockedError } = require('./safe-error');
 
 const BASE = 'https://dpm.lol/v1/studio';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -105,20 +106,21 @@ function laneSlug(role) {
 }
 
 async function fetchJson(url) {
-  const body = await cloudscraper.get({
-    uri: url,
-    headers: {
-      Accept: 'application/json',
-      Origin: 'https://dpm.lol',
-      Referer: 'https://dpm.lol/studio',
-    },
-  });
-  const text = String(body || '');
-  if (text.trimStart().startsWith('<')) {
-    const err = new Error('studio blocked');
-    err.status = 403;
-    throw err;
+  let body;
+  try {
+    body = await cloudscraper.get({
+      uri: url,
+      headers: {
+        Accept: 'application/json',
+        Origin: 'https://dpm.lol',
+        Referer: 'https://dpm.lol/studio',
+      },
+    });
+  } catch {
+    throw blockedError('Data Studio');
   }
+  const text = String(body || '');
+  if (text.trimStart().startsWith('<')) throw blockedError('Data Studio');
   return JSON.parse(text);
 }
 
@@ -218,7 +220,7 @@ async function getStudioMeta(args = {}) {
   } catch (err) {
     return {
       view: args.view || 'home',
-      error: err.message || 'Failed to load studio data',
+      error: publicError(err, 'Could not load Data Studio.'),
       rows: [],
       refreshing: false,
       source: 'dpm',

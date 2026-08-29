@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getStudioMeta } from './api';
+import { getStudioMeta, publicError } from './api';
 
 export function useStudioMeta({ platform, queue = 420, enabled = true }) {
   const [payload, setPayload] = useState(null);
@@ -33,7 +33,7 @@ export function useStudioMeta({ platform, queue = 420, enabled = true }) {
     distribution: payload?.distribution || null,
     updatedAt: payload?.updatedAt || null,
     loading: enabled && loading,
-    error: payload?.error || null,
+    error: payload?.error ? publicError(payload.error, 'Could not load Data Studio.') : null,
     platform: payload?.platform || platform,
   };
 }
@@ -77,7 +77,7 @@ export function useStudioView({
       }
     }).catch((err) => {
       if (!cancelled) {
-        setPayload({ error: err?.message || 'Failed to load', rows: [] });
+        setPayload({ error: publicError(err?.message, 'Could not load Data Studio.'), rows: [] });
         setLoading(false);
       }
     });
@@ -92,7 +92,7 @@ export function useStudioView({
     totalMatches: payload?.totalMatches ?? null,
     updatedAt: payload?.updatedAt || null,
     loading: enabled && loading,
-    error: payload?.error || null,
+    error: payload?.error ? publicError(payload.error, 'Could not load Data Studio.') : null,
     source: payload?.source || null,
     dimension: payload?.dimension || dimension,
   };

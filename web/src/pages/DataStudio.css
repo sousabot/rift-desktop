@@ -333,6 +333,15 @@
   border-radius: 10px;
   background: rgba(255,255,255,0.03);
 }
+.st-home-empty-preview.is-msg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 .st-home-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

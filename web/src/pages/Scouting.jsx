@@ -238,11 +238,11 @@ export default function Scouting() {
         if (!alive) return;
         setData(payload);
         if (payload?.ddragonVersion) setVersion(payload.ddragonVersion);
-        if (payload?.ok === false) setError(payload.error || 'Scouting failed');
+        if (payload?.ok === false) setError(payload.error || 'Could not load scouting players.');
       })
       .catch((err) => {
         if (!alive) return;
-        setError(err.message || 'Scouting failed');
+        setError(err.message || 'Could not load scouting players.');
       })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -250,6 +250,7 @@ export default function Scouting() {
 
   const entries = data?.entries || [];
   const hasRows = entries.length > 0;
+  const slim = data?.source === 'riot';
   const reloading = loading && hasRows;
   const nearestLp = useMemo(() => {
     let best = LP_STEPS[0];
@@ -289,7 +290,13 @@ export default function Scouting() {
         <div>
           <p className="sc-kicker">Scouting</p>
           <h1>Scouting Players</h1>
-          <p>{updatedLabel(data?.updatedAt)} · Master+ SoloQ by region. Click a metric to sort.</p>
+          <p>
+            {updatedLabel(data?.updatedAt)}
+            {' · '}
+            {data?.source === 'riot'
+              ? 'Master+ SoloQ ladder by region.'
+              : 'Master+ SoloQ by region. Click a metric to sort.'}
+          </p>
         </div>
         <div className="sc-hero-meta">
           <div className="sc-stat">
@@ -365,6 +372,7 @@ export default function Scouting() {
       </p>
 
       {error ? <div className="note is-error">{error}</div> : null}
+      {!error && data?.note ? <div className="note">{data.note}</div> : null}
 
       {loading && !hasRows ? (
         <div className="sc-table-wrap">
@@ -407,15 +415,19 @@ export default function Scouting() {
                 <th>
                   <SortBtn id="winrate" sort={sort} dir={dir} onSort={pickSort}>WR</SortBtn>
                 </th>
-                <th>
-                  <SortBtn id="kda" sort={sort} dir={dir} onSort={pickSort}>KDA</SortBtn>
-                </th>
-                <th className="is-num">Early</th>
-                <th className="is-num">Impact</th>
-                <th className="is-num">Farm</th>
-                <th>
-                  <SortBtn id="uniqueChampions" sort={sort} dir={dir} onSort={pickSort}>Pool</SortBtn>
-                </th>
+                {slim ? null : (
+                  <>
+                    <th>
+                      <SortBtn id="kda" sort={sort} dir={dir} onSort={pickSort}>KDA</SortBtn>
+                    </th>
+                    <th className="is-num">Early</th>
+                    <th className="is-num">Impact</th>
+                    <th className="is-num">Farm</th>
+                    <th>
+                      <SortBtn id="uniqueChampions" sort={sort} dir={dir} onSort={pickSort}>Pool</SortBtn>
+                    </th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -474,103 +486,107 @@ export default function Scouting() {
                     <td className={sort === 'winrate' || sort === 'games' ? 'is-sorted' : ''}>
                       <WrCell row={row} sort={sort} dir={dir} onSort={pickSort} />
                     </td>
-                    <td className={`is-kda ${kdaTone(kda)}${sort === 'kda' ? ' is-sorted' : ''}`}>
-                      <strong>{kda.toFixed(2)}</strong>
-                      {hasLine ? (
-                        <em>{row.kills} / {row.deaths} / {row.assists}</em>
-                      ) : null}
-                    </td>
-                    <td className={`is-num${sort === 'goldDiffAt15' || sort === 'csDiffAt15' ? ' is-sorted' : ''}`}>
-                      <div className="sc-stack">
-                        <Metric
-                          id="goldDiffAt15"
-                          sort={sort}
-                          dir={dir}
-                          onSort={pickSort}
-                          value={fmtDiff(row.goldDiffAt15)}
-                          label="G@15"
-                          className={diffClass(row.goldDiffAt15)}
-                        />
-                        <Metric
-                          id="csDiffAt15"
-                          sort={sort}
-                          dir={dir}
-                          onSort={pickSort}
-                          value={fmtDiff(row.csDiffAt15, 1)}
-                          label="CS@15"
-                          className={diffClass(row.csDiffAt15)}
-                        />
-                      </div>
-                    </td>
-                    <td className={`is-num${['killParticipation', 'firstbloodRate', 'visionScorePerMinute'].includes(sort) ? ' is-sorted' : ''}`}>
-                      <div className="sc-stack">
-                        <Metric
-                          id="killParticipation"
-                          sort={sort}
-                          dir={dir}
-                          onSort={pickSort}
-                          value={`${row.killParticipation}%`}
-                          label="KP"
-                        />
-                        <Metric
-                          id="firstbloodRate"
-                          sort={sort}
-                          dir={dir}
-                          onSort={pickSort}
-                          value={`${row.firstbloodRate}%`}
-                          label="FB"
-                        />
-                        <Metric
-                          id="visionScorePerMinute"
-                          sort={sort}
-                          dir={dir}
-                          onSort={pickSort}
-                          value={Number(row.visionScorePerMinute).toFixed(2)}
-                          label="VS/m"
-                        />
-                      </div>
-                    </td>
-                    <td className={`is-num is-farm${['csm', 'dmgm', 'dmggold'].includes(sort) ? ' is-sorted' : ''}`}>
-                      <div className="sc-stack">
-                        <Metric
-                          id="csm"
-                          sort={sort}
-                          dir={dir}
-                          onSort={pickSort}
-                          value={Number(row.csm).toFixed(2)}
-                          label="CS/m"
-                        />
-                        <Metric
-                          id="dmgm"
-                          sort={sort}
-                          dir={dir}
-                          onSort={pickSort}
-                          value={Number(row.dmgm).toLocaleString()}
-                          label="DMG/m"
-                        />
-                        <Metric
-                          id="dmggold"
-                          sort={sort}
-                          dir={dir}
-                          onSort={pickSort}
-                          value={Number(row.dmggold).toFixed(2)}
-                          label="DMG/g"
-                        />
-                      </div>
-                    </td>
-                    <td className={sort === 'uniqueChampions' ? 'is-sorted' : ''}>
-                      <div className="sc-champs" title={`${row.uniqueChampions} champions`}>
-                        {(row.champions || []).slice(0, 4).map((ch) => (
-                          <img
-                            key={ch.championId}
-                            src={champSrc(ch, version)}
-                            alt={ch.champion}
-                            title={ch.champion}
-                          />
-                        ))}
-                        <em>{row.uniqueChampions}</em>
-                      </div>
-                    </td>
+                    {slim ? null : (
+                      <>
+                        <td className={`is-kda ${kdaTone(kda)}${sort === 'kda' ? ' is-sorted' : ''}`}>
+                          <strong>{kda.toFixed(2)}</strong>
+                          {hasLine ? (
+                            <em>{row.kills} / {row.deaths} / {row.assists}</em>
+                          ) : null}
+                        </td>
+                        <td className={`is-num${sort === 'goldDiffAt15' || sort === 'csDiffAt15' ? ' is-sorted' : ''}`}>
+                          <div className="sc-stack">
+                            <Metric
+                              id="goldDiffAt15"
+                              sort={sort}
+                              dir={dir}
+                              onSort={pickSort}
+                              value={fmtDiff(row.goldDiffAt15)}
+                              label="G@15"
+                              className={diffClass(row.goldDiffAt15)}
+                            />
+                            <Metric
+                              id="csDiffAt15"
+                              sort={sort}
+                              dir={dir}
+                              onSort={pickSort}
+                              value={fmtDiff(row.csDiffAt15, 1)}
+                              label="CS@15"
+                              className={diffClass(row.csDiffAt15)}
+                            />
+                          </div>
+                        </td>
+                        <td className={`is-num${['killParticipation', 'firstbloodRate', 'visionScorePerMinute'].includes(sort) ? ' is-sorted' : ''}`}>
+                          <div className="sc-stack">
+                            <Metric
+                              id="killParticipation"
+                              sort={sort}
+                              dir={dir}
+                              onSort={pickSort}
+                              value={`${row.killParticipation}%`}
+                              label="KP"
+                            />
+                            <Metric
+                              id="firstbloodRate"
+                              sort={sort}
+                              dir={dir}
+                              onSort={pickSort}
+                              value={`${row.firstbloodRate}%`}
+                              label="FB"
+                            />
+                            <Metric
+                              id="visionScorePerMinute"
+                              sort={sort}
+                              dir={dir}
+                              onSort={pickSort}
+                              value={Number(row.visionScorePerMinute).toFixed(2)}
+                              label="VS/m"
+                            />
+                          </div>
+                        </td>
+                        <td className={`is-num is-farm${['csm', 'dmgm', 'dmggold'].includes(sort) ? ' is-sorted' : ''}`}>
+                          <div className="sc-stack">
+                            <Metric
+                              id="csm"
+                              sort={sort}
+                              dir={dir}
+                              onSort={pickSort}
+                              value={Number(row.csm).toFixed(2)}
+                              label="CS/m"
+                            />
+                            <Metric
+                              id="dmgm"
+                              sort={sort}
+                              dir={dir}
+                              onSort={pickSort}
+                              value={Number(row.dmgm).toLocaleString()}
+                              label="DMG/m"
+                            />
+                            <Metric
+                              id="dmggold"
+                              sort={sort}
+                              dir={dir}
+                              onSort={pickSort}
+                              value={Number(row.dmggold).toFixed(2)}
+                              label="DMG/g"
+                            />
+                          </div>
+                        </td>
+                        <td className={sort === 'uniqueChampions' ? 'is-sorted' : ''}>
+                          <div className="sc-champs" title={`${row.uniqueChampions} champions`}>
+                            {(row.champions || []).slice(0, 4).map((ch) => (
+                              <img
+                                key={ch.championId}
+                                src={champSrc(ch, version)}
+                                alt={ch.champion}
+                                title={ch.champion}
+                              />
+                            ))}
+                            <em>{row.uniqueChampions}</em>
+                          </div>
+                        </td>
+                      </>
+                    )}
                   </tr>
                 );
               })}
