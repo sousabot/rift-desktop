@@ -251,7 +251,7 @@ async function loadRiotLadder(riotFetch, platform) {
   return payload;
 }
 
-async function enrichRiotNames(riotFetch, entries, platform) {
+async function enrichRiotIdentities(riotFetch, entries, platform) {
   const host = ACCOUNT_HOST[platform] || 'europe';
   await mapWithConcurrency(entries, 4, async (row) => {
     if (!row.puuid) return;
@@ -260,23 +260,37 @@ async function enrichRiotNames(riotFetch, entries, platform) {
       row.gameName = cached.gameName;
       row.tagLine = cached.tagLine;
       row.displayName = cached.gameName;
-      return;
+      if (cached.profileIconId) row.profileIconId = cached.profileIconId;
+      if (cached.profileIconId) return;
     }
-    if (row.tagLine && row.gameName && row.gameName.length > 8) return;
-    try {
-      const account = await riotFetch(
-        `https://${host}.api.riotgames.com/riot/account/v1/accounts/by-puuid/${row.puuid}`
-      );
-      if (!account?.gameName) return;
-      row.gameName = account.gameName;
-      row.tagLine = account.tagLine || '';
-      row.displayName = account.gameName;
-      riotNameCache.set(row.puuid, {
-        gameName: row.gameName,
-        tagLine: row.tagLine,
-        at: Date.now(),
-      });
-    } catch { /* keep placeholder */ }
+    const haveName = row.tagLine && row.gameName && row.gameName.length > 8;
+    if (!haveName) {
+      try {
+        const account = await riotFetch(
+          `https://${host}.api.riotgames.com/riot/account/v1/accounts/by-puuid/${row.puuid}`
+        );
+        if (account?.gameName) {
+          row.gameName = account.gameName;
+          row.tagLine = account.tagLine || '';
+          row.displayName = account.gameName;
+        }
+      } catch { /* keep placeholder */ }
+    }
+    if (!row.profileIconId) {
+      try {
+        const summoner = await riotFetch(
+          `https://${platform}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${row.puuid}`
+        );
+        if (summoner?.profileIconId) row.profileIconId = Number(summoner.profileIconId) || 0;
+      } catch { /* icon is optional */ }
+    }
+    if (!row.gameName) return;
+    riotNameCache.set(row.puuid, {
+      gameName: row.gameName,
+      tagLine: row.tagLine || '',
+      profileIconId: row.profileIconId || 0,
+      at: Date.now(),
+    });
   });
 }
 
@@ -380,7 +394,7 @@ async function getScouting({
           max: Math.min(max, RIOT_SCOUT_LIMIT),
           source: 'riot',
         });
-        await enrichRiotNames(riotFetch, payload.entries, plat);
+        await enrichRiotIdentities(riotFetch, payload.entries, plat);
         return payload;
       } catch { /* fall through to sanitized error */ }
     }
