@@ -16,8 +16,32 @@ const SORT_KEYS = new Set([
 ]);
 
 const rawCache = new Map();
+const riotCache = new Map();
+const riotNameCache = new Map();
 const inflight = new Map();
 let nameCache = null;
+
+const RIOT_SCOUT_LIMIT = 50;
+const ACCOUNT_TTL_MS = 30 * 60 * 1000;
+const ACCOUNT_HOST = {
+  euw1: 'europe', eun1: 'europe', tr1: 'europe', ru: 'europe', me1: 'europe',
+  na1: 'americas', br1: 'americas', la1: 'americas', la2: 'americas',
+  kr: 'asia', jp1: 'asia', oc1: 'asia',
+  ph2: 'asia', sg2: 'asia', th2: 'asia', tw2: 'asia', vn2: 'asia',
+};
+
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, Math.max(1, items.length)) }, () => worker()));
+  return results;
+}
 
 async function fetchJson(url) {
   let body;
@@ -201,6 +225,10 @@ function riotToRaw(e, platform) {
 }
 
 async function loadRiotLadder(riotFetch, platform) {
+  const key = `riot:${platform}`;
+  const hit = riotCache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit;
+
   const results = await Promise.allSettled([
     leagueEntries(riotFetch, platform, 'challenger'),
     leagueEntries(riotFetch, platform, 'grandmaster'),
@@ -218,7 +246,38 @@ async function loadRiotLadder(riotFetch, platform) {
     }
   }
   if (!list.length) throw new Error('Could not load scouting players.');
-  return { at: Date.now(), list, source: 'riot' };
+  const payload = { at: Date.now(), list, source: 'riot' };
+  riotCache.set(key, payload);
+  return payload;
+}
+
+async function enrichRiotNames(riotFetch, entries, platform) {
+  const host = ACCOUNT_HOST[platform] || 'europe';
+  await mapWithConcurrency(entries, 4, async (row) => {
+    if (!row.puuid) return;
+    const cached = riotNameCache.get(row.puuid);
+    if (cached && Date.now() - cached.at < ACCOUNT_TTL_MS) {
+      row.gameName = cached.gameName;
+      row.tagLine = cached.tagLine;
+      row.displayName = cached.gameName;
+      return;
+    }
+    if (row.tagLine && row.gameName && row.gameName.length > 8) return;
+    try {
+      const account = await riotFetch(
+        `https://${host}.api.riotgames.com/riot/account/v1/accounts/by-puuid/${row.puuid}`
+      );
+      if (!account?.gameName) return;
+      row.gameName = account.gameName;
+      row.tagLine = account.tagLine || '';
+      row.displayName = account.gameName;
+      riotNameCache.set(row.puuid, {
+        gameName: row.gameName,
+        tagLine: row.tagLine,
+        at: Date.now(),
+      });
+    } catch { /* keep placeholder */ }
+  });
 }
 
 function buildScouting({
@@ -309,9 +368,20 @@ async function getScouting({
     if (typeof riotFetch === 'function') {
       try {
         const raw = await loadRiotLadder(riotFetch, plat);
-        return buildScouting({
-          raw, names, plat, roleLane, lpFloor, sortKey, descending, query, max, source: 'riot',
+        const payload = buildScouting({
+          raw,
+          names,
+          plat,
+          roleLane,
+          lpFloor,
+          sortKey,
+          descending,
+          query,
+          max: Math.min(max, RIOT_SCOUT_LIMIT),
+          source: 'riot',
         });
+        await enrichRiotNames(riotFetch, payload.entries, plat);
+        return payload;
       } catch { /* fall through to sanitized error */ }
     }
     return {
