@@ -274,7 +274,7 @@ export default function Leaderboard() {
       .catch((err) => {
         if (alive) {
           setError(err.message || 'Leaderboard failed');
-          setData(null);
+          setData((prev) => (prev?.entries?.length ? prev : null));
         }
       })
       .finally(() => { if (alive) setLoading(false); });

@@ -149,10 +149,22 @@ export default function Home() {
   useEffect(() => {
     let alive = true;
     setLbLoading(true);
-    getLeaderboard({ tier: 'challenger', platform: lbPlatform })
-      .then((payload) => { if (alive) setLbData(payload); })
-      .catch(() => { if (alive) setLbData(null); })
-      .finally(() => { if (alive) setLbLoading(false); });
+    const load = (attempt) => getLeaderboard({ tier: 'challenger', platform: lbPlatform })
+      .then((payload) => {
+        if (!alive) return;
+        if (payload?.entries?.length) {
+          setLbData(payload);
+          return;
+        }
+        if (attempt < 1) return load(attempt + 1);
+        setLbData((prev) => (prev?.platform === lbPlatform && prev.entries?.length ? prev : payload));
+      })
+      .catch(() => {
+        if (!alive) return;
+        if (attempt < 1) return load(attempt + 1);
+        setLbData((prev) => (prev?.platform === lbPlatform && prev.entries?.length ? prev : null));
+      });
+    load(0).finally(() => { if (alive) setLbLoading(false); });
     return () => { alive = false; };
   }, [lbPlatform]);
 

@@ -144,7 +144,7 @@ export function getTierList({ platform = 'euw1', rank = 'master', force = false 
 export function getLeaderboard({ tier = 'challenger', platform = 'euw1', mode = 'soloq' } = {}) {
   const q = new URLSearchParams({ tier, platform, mode });
   const path = `/v1/web/leaderboard?${q.toString()}`;
-  return getJson(path).then((body) => assertFlexPayload(path, body));
+  return getJson(path, { timeoutMs: 60000 }).then((body) => assertFlexPayload(path, body));
 }
 
 export function getChampionDetail({

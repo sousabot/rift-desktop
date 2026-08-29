@@ -9,10 +9,12 @@ const PLATFORM_TO_MATCH_REGION = {
 
 const ALL_PLATFORMS = Object.keys(PLATFORM_TO_MATCH_REGION);
 const LEADERBOARD_LIMIT = 50;
-const LEAGUE_TTL_MS = 5 * 60 * 1000;
+const LEAGUE_TTL_MS = 10 * 60 * 1000;
 const ACCOUNT_TTL_MS = 30 * 60 * 1000;
+const ICON_ENRICH_LIMIT = 8;
 
 const leagueCache = new Map();
+const leagueInflight = new Map();
 const accountCache = new Map();
 const identityCache = new Map();
 
@@ -157,16 +159,18 @@ async function lookupAccount(riotFetch, { gameName, tagLine, platform, region })
 async function loadLeagueEntries(riotFetch, tier, queue, platform) {
   const t = String(tier || 'challenger').toLowerCase();
   const q = queue || 'RANKED_SOLO_5x5';
-  try {
-    const page = await riotFetch(
-      `https://${platform}.api.riotgames.com/lol/league-exp/v4/entries/${q}/${t.toUpperCase()}/I?page=1`
+  const apex = t === 'challenger' || t === 'grandmaster' || t === 'master';
+  // Personal keys often cannot call league-exp. Apex ladders have a dedicated endpoint — use that first.
+  if (apex) {
+    const data = await riotFetch(
+      `https://${platform}.api.riotgames.com/lol/league/v4/${t}leagues/by-queue/${q}`
     );
-    if (Array.isArray(page) && page.length) return page;
-  } catch { /* fallback */ }
-  const data = await riotFetch(
-    `https://${platform}.api.riotgames.com/lol/league/v4/${t}leagues/by-queue/${q}`
+    return Array.isArray(data?.entries) ? data.entries : [];
+  }
+  const page = await riotFetch(
+    `https://${platform}.api.riotgames.com/lol/league-exp/v4/entries/${q}/${t.toUpperCase()}/I?page=1`
   );
-  return Array.isArray(data?.entries) ? data.entries : [];
+  return Array.isArray(page) ? page : [];
 }
 
 async function getLeaderboard(riotFetch, {
@@ -182,93 +186,110 @@ async function getLeaderboard(riotFetch, {
   const key = `${plat}:${t}:${riotQueue}`;
   const hit = leagueCache.get(key);
   if (hit && Date.now() - hit.at < (hit.ttl || LEAGUE_TTL_MS)) return hit.data;
+  if (leagueInflight.has(key)) return leagueInflight.get(key);
 
-  const entries = await loadLeagueEntries(riotFetch, t, riotQueue, plat);
-  const ladder = [...entries].sort((a, b) => (b.leaguePoints || 0) - (a.leaguePoints || 0));
-  // Only the visible slice gets enriched: each row costs an account + summoner call.
-  const top = ladder.slice(0, LEADERBOARD_LIMIT);
-  const accountHost = region === 'sea' ? 'asia' : region;
+  const work = buildLeaderboard(riotFetch, {
+    t, plat, region, qKey, riotQueue, key, stale: hit?.data,
+  }).finally(() => leagueInflight.delete(key));
+  leagueInflight.set(key, work);
+  return work;
+}
 
-  // Names first (account-v1), then icons (summoner-v4). Bursting both at once
-  // trips the 20 req/s personal-key cap around row 20 and those names stay Unknown.
-  const identities = top.map((row) => {
-    if (!row.puuid) return { gameName: null, tagLine: '', profileIconId: null };
-    const cached = identityCache.get(row.puuid);
-    if (cached && Date.now() - cached.at < ACCOUNT_TTL_MS) return { ...cached };
-    return { gameName: null, tagLine: '', profileIconId: null };
-  });
+async function buildLeaderboard(riotFetch, {
+  t, plat, region, qKey, riotQueue, key, stale,
+}) {
+  try {
+    const entries = await loadLeagueEntries(riotFetch, t, riotQueue, plat);
+    const ladder = [...entries].sort((a, b) => (b.leaguePoints || 0) - (a.leaguePoints || 0));
+    const top = ladder.slice(0, LEADERBOARD_LIMIT);
+    const accountHost = region === 'sea' ? 'asia' : region;
 
-  await mapWithConcurrency(top, 2, async (row, i) => {
-    if (!row.puuid || identities[i].gameName) return;
-    try {
-      const account = await riotRetry(
-        riotFetch,
-        `https://${accountHost}.api.riotgames.com/riot/account/v1/accounts/by-puuid/${row.puuid}`
-      );
-      identities[i].gameName = account?.gameName || null;
-      identities[i].tagLine = account?.tagLine || '';
-    } catch { /* leave unknown; retry next refresh */ }
-  });
+    const identities = top.map((row) => {
+      if (!row.puuid) return { gameName: null, tagLine: '', profileIconId: null };
+      const cached = identityCache.get(row.puuid);
+      if (cached && Date.now() - cached.at < ACCOUNT_TTL_MS) return { ...cached };
+      if (row.riotIdGameName) {
+        return {
+          gameName: row.riotIdGameName,
+          tagLine: row.riotIdTagline || '',
+          profileIconId: null,
+        };
+      }
+      return { gameName: null, tagLine: '', profileIconId: null };
+    });
 
-  await mapWithConcurrency(top, 2, async (row, i) => {
-    if (!row.puuid) return;
-    if (identities[i].profileIconId) return;
-    try {
-      const summoner = await riotRetry(
-        riotFetch,
-        `https://${plat}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${row.puuid}`
-      );
-      identities[i].profileIconId = summoner?.profileIconId || null;
-    } catch { /* icon is optional */ }
-  });
+    await mapWithConcurrency(top, 4, async (row, i) => {
+      if (!row.puuid || identities[i].gameName) return;
+      try {
+        const account = await riotRetry(
+          riotFetch,
+          `https://${accountHost}.api.riotgames.com/riot/account/v1/accounts/by-puuid/${row.puuid}`
+        );
+        identities[i].gameName = account?.gameName || null;
+        identities[i].tagLine = account?.tagLine || '';
+      } catch { /* leave unknown; retry next refresh */ }
+    });
 
-  identities.forEach((id, i) => {
-    if (!id.gameName || !top[i]?.puuid) return;
-    identityCache.set(top[i].puuid, { ...id, at: Date.now() });
-  });
+    await mapWithConcurrency(top.slice(0, ICON_ENRICH_LIMIT), 3, async (row, i) => {
+      if (!row.puuid || identities[i].profileIconId) return;
+      try {
+        const summoner = await riotRetry(
+          riotFetch,
+          `https://${plat}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${row.puuid}`
+        );
+        identities[i].profileIconId = summoner?.profileIconId || null;
+      } catch { /* icon is optional */ }
+    });
 
-  const rows = top.map((e, i) => {
-    const id = identities[i] || {};
-    return {
-      rank: i + 1,
-      puuid: e.puuid,
-      gameName: id.gameName || e.riotIdGameName || e.summonerName || 'Unknown',
-      tagLine: id.tagLine || e.riotIdTagline || '',
-      summonerName: id.gameName
-        ? `${id.gameName}#${id.tagLine}`
-        : (e.puuid || 'Unknown').slice(0, 8),
-      profileIconId: id.profileIconId || null,
-      lp: e.leaguePoints || 0,
-      wins: e.wins || 0,
-      losses: e.losses || 0,
-      hotStreak: !!e.hotStreak,
-      veteran: !!e.veteran,
-      freshBlood: !!e.freshBlood,
-      inactive: !!e.inactive,
+    identities.forEach((id, i) => {
+      if (!id.gameName || !top[i]?.puuid) return;
+      identityCache.set(top[i].puuid, { ...id, at: Date.now() });
+    });
+
+    const rows = top.map((e, i) => {
+      const id = identities[i] || {};
+      return {
+        rank: i + 1,
+        puuid: e.puuid,
+        gameName: id.gameName || e.riotIdGameName || e.summonerName || 'Unknown',
+        tagLine: id.tagLine || e.riotIdTagline || '',
+        summonerName: id.gameName
+          ? `${id.gameName}#${id.tagLine}`
+          : (e.puuid || 'Unknown').slice(0, 8),
+        profileIconId: id.profileIconId || null,
+        lp: e.leaguePoints || 0,
+        wins: e.wins || 0,
+        losses: e.losses || 0,
+        hotStreak: !!e.hotStreak,
+        veteran: !!e.veteran,
+        freshBlood: !!e.freshBlood,
+        inactive: !!e.inactive,
+      };
+    });
+
+    const unknown = rows.filter((r) => r.gameName === 'Unknown').length;
+    const payload = {
+      tier: t,
+      mode: qKey === 'flex' ? 'flex' : 'soloq',
+      queue: riotQueue,
+      platform: plat,
+      region,
+      builtAt: Date.now(),
+      limit: LEADERBOARD_LIMIT,
+      totalEntries: ladder.length,
+      cutoffLp: ladder.length ? (ladder[ladder.length - 1].leaguePoints || 0) : null,
+      entries: rows,
     };
-  });
-
-  const unknown = rows.filter((r) => r.gameName === 'Unknown').length;
-  const payload = {
-    tier: t,
-    mode: qKey === 'flex' ? 'flex' : 'soloq',
-    queue: riotQueue,
-    platform: plat,
-    region,
-    builtAt: Date.now(),
-    // The ladder is far larger than the enriched slice; the UI says so rather than implying 50 is all of it.
-    limit: LEADERBOARD_LIMIT,
-    totalEntries: ladder.length,
-    cutoffLp: ladder.length ? (ladder[ladder.length - 1].leaguePoints || 0) : null,
-    entries: rows,
-  };
-  // Don't pin a half-named ladder in cache — the next refresh can fill holes.
-  leagueCache.set(key, {
-    at: Date.now(),
-    data: payload,
-    ttl: unknown > 5 ? 30 * 1000 : LEAGUE_TTL_MS,
-  });
-  return payload;
+    leagueCache.set(key, {
+      at: Date.now(),
+      data: payload,
+      ttl: unknown > 10 ? 90 * 1000 : LEAGUE_TTL_MS,
+    });
+    return payload;
+  } catch (err) {
+    if (stale?.entries?.length) return { ...stale, stale: true };
+    throw err;
+  }
 }
 
 function registerWebApi(router) {
