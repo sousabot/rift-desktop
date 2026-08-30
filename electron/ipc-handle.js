@@ -5,6 +5,14 @@ function handle(ipcMain, channel, listener) {
   ipcMain.handle(channel, listener);
 }
 
+function stubHandle(ipcMain, channel, listener) {
+  try {
+    handle(ipcMain, channel, listener);
+  } catch (err) {
+    console.error(`[ipc] ${channel} stub failed:`, err);
+  }
+}
+
 function safeRegister(name, fn) {
   try {
     fn();
@@ -13,4 +21,4 @@ function safeRegister(name, fn) {
   }
 }
 
-module.exports = { handle, safeRegister };
+module.exports = { handle, stubHandle, safeRegister };

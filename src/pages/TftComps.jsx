@@ -448,19 +448,23 @@ export default function TftComps() {
     setLoading(true);
     setError('');
     try {
-      const [res, pin] = await Promise.all([
-        api.getComps({ force }),
-        api.getPinned?.() || Promise.resolve(null),
-      ]);
+      const res = await api.getComps({ force });
       setData(res || null);
-      setPinnedId(pin?.id || null);
-      if (res?.error && !res?.comps?.length) setError(res.error);
-      else if (res?.error) setError('');
+      if (res?.error && !res?.comps?.length) {
+        setError(apiUserMessage({ message: res.error }) || res.error);
+      } else {
+        setError('');
+      }
     } catch (err) {
       setError(apiUserMessage(err) || err?.message || t('tft.failed'));
-    } finally {
-      setLoading(false);
     }
+    try {
+      const pin = await api.getPinned?.();
+      setPinnedId(pin?.id || null);
+    } catch {
+      /* pin is optional — do not blank the comps list */
+    }
+    setLoading(false);
   };
 
   useEffect(() => {

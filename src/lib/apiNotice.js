@@ -16,7 +16,7 @@ export function apiUserMessage(err) {
     return 'Open Rift.lol as the desktop app to load live Riot data.';
   }
   if (lower.includes('no handler registered')) {
-    return 'This feature needs a full restart. Close Rift.lol from the tray, then open it again.';
+    return 'This page could not start. Install the latest Rift.lol Setup, then open it again.';
   }
   if (msg.includes('429') || lower.includes('rate limit')) {
     return 'Rate limit hit. Wait 2 minutes, then try again.';

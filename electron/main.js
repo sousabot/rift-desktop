@@ -7,7 +7,7 @@ const recorder = require('./recorder');
 const { getLiveSnapshot, getLiveRoster } = require('./live-client');
 const { getVideoMode, ensureBorderless, enableFullscreenOptimizations } = require('./league-config');
 const overlayPanels = require('./overlay-panels');
-const { handle, safeRegister } = require('./ipc-handle');
+const { handle, stubHandle, safeRegister } = require('./ipc-handle');
 
 function broadcastPanelToggles(toggles) {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -190,6 +190,17 @@ app.on('second-instance', () => showMainWindow());
 
 app.whenReady().then(() => {
   if (!gotLock) return;
+  stubHandle(ipcMain, 'tft:comps', async () => ({
+    builtAt: Date.now(),
+    clusterId: null,
+    tftSet: '',
+    source: 'metatft',
+    comps: [],
+    units: [],
+    error: 'TFT comps failed to start. Install the latest Rift.lol Setup.',
+  }));
+  stubHandle(ipcMain, 'tft:getPinned', async () => null);
+  stubHandle(ipcMain, 'tft:setPinned', async () => null);
   safeRegister('overlay', () => overlay.init(app));
   const riotIpc = require('./riot-ipc');
   safeRegister('riot-ipc', () => riotIpc(ipcMain));

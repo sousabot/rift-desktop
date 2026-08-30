@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const cloudscraper = require('cloudscraper');
+const { publicError } = require('./safe-error');
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const HC = 'https://api-hc.metatft.com';
@@ -11,6 +11,40 @@ const CDN = 'https://cdn.metatft.com/file/metatft';
 
 const memory = { at: 0, data: null, stale: null };
 let inflight = null;
+let cloudscraper = null;
+let bundledFallback = null;
+
+function getScraper() {
+  if (!cloudscraper) cloudscraper = require('cloudscraper');
+  return cloudscraper;
+}
+
+function loadBundledFallback() {
+  if (bundledFallback !== null) return bundledFallback;
+  try {
+    bundledFallback = JSON.parse(fs.readFileSync(path.join(__dirname, 'tft-comps-fallback.json'), 'utf8'));
+  } catch {
+    bundledFallback = { comps: [] };
+  }
+  return bundledFallback;
+}
+
+function snapshotResult() {
+  const snap = loadBundledFallback();
+  if (!snap?.comps?.length) return null;
+  return {
+    builtAt: snap.builtAt || Date.now(),
+    clusterId: snap.clusterId || null,
+    tftSet: snap.tftSet || '',
+    source: 'snapshot',
+    comps: snap.comps,
+    units: Array.isArray(snap.units) ? snap.units : [],
+    unitsVersion: snap.unitsVersion || 4,
+    cached: true,
+    stale: true,
+    error: null,
+  };
+}
 
 function cachePath() {
   const dir = process.env.RIFT_CACHE_DIR
@@ -34,7 +68,7 @@ function writeDisk(payload) {
 }
 
 async function fetchJson(url) {
-  const body = await cloudscraper.get({
+  const body = await getScraper().get({
     uri: url,
     headers: {
       Accept: 'application/json',
@@ -467,6 +501,10 @@ async function getTftComps({ force = false } = {}) {
       return { ...disk.data, cached: true };
     }
     if (disk?.data?.comps?.length) memory.stale = disk.data;
+    else {
+      const snap = snapshotResult();
+      if (snap) memory.stale = snap;
+    }
   }
 
   if (inflight) return inflight;
@@ -486,9 +524,11 @@ async function getTftComps({ force = false } = {}) {
           ...stale,
           cached: true,
           stale: true,
-          error: err?.message || 'Could not refresh TFT comps',
+          error: null,
         };
       }
+      const snap = snapshotResult();
+      if (snap) return snap;
       return {
         builtAt: Date.now(),
         clusterId: null,
@@ -497,7 +537,7 @@ async function getTftComps({ force = false } = {}) {
         comps: [],
         units: [],
         cached: false,
-        error: err?.message || 'Could not load TFT comps',
+        error: publicError(err, 'Could not load TFT comps'),
       };
     } finally {
       inflight = null;

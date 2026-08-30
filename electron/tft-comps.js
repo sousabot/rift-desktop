@@ -52,8 +52,20 @@ function broadcastPinned(comp) {
   }
 }
 
+function emptyPayload(error) {
+  return {
+    builtAt: Date.now(),
+    clusterId: null,
+    tftSet: '',
+    source: 'metatft',
+    comps: [],
+    units: [],
+    error,
+  };
+}
+
 module.exports = function registerTftComps(ipcMain) {
-  cacheDir();
+  try { cacheDir(); } catch { /* ignore */ }
   let getTftComps = null;
   try {
     getTftComps = require('../server/tft-comps').getTftComps;
@@ -61,36 +73,40 @@ module.exports = function registerTftComps(ipcMain) {
     console.error('[tft] server/tft-comps.js is not in this build:', err?.message || err);
   }
 
-  handle(ipcMain, 'tft:comps', async (_e, args = {}) => {
-    try {
-      if (typeof getTftComps !== 'function') {
-        return {
-          builtAt: Date.now(),
-          clusterId: null,
-          tftSet: '',
-          source: 'metatft',
-          comps: [],
-          error: 'TFT comps are missing from this install. Update to the latest Setup build.',
-        };
+  try {
+    handle(ipcMain, 'tft:comps', async (_e, args = {}) => {
+      try {
+        if (typeof getTftComps !== 'function') {
+          return emptyPayload('TFT comps are missing from this install. Update to the latest Setup build.');
+        }
+        return await getTftComps(args || {});
+      } catch (err) {
+        return emptyPayload(err?.message || 'Could not load TFT comps');
       }
-      return await getTftComps(args || {});
-    } catch (err) {
-      return {
-        builtAt: Date.now(),
-        clusterId: null,
-        tftSet: '',
-        source: 'metatft',
-        comps: [],
-        error: err?.message || 'Could not load TFT comps',
-      };
-    }
-  });
+    });
+  } catch (err) {
+    console.error('[tft] tft:comps handle failed:', err);
+  }
 
-  handle(ipcMain, 'tft:getPinned', () => loadPinned());
+  try {
+    handle(ipcMain, 'tft:getPinned', () => {
+      try { return loadPinned(); } catch { return null; }
+    });
+  } catch (err) {
+    console.error('[tft] tft:getPinned handle failed:', err);
+  }
 
-  handle(ipcMain, 'tft:setPinned', (_e, comp) => {
-    const next = savePinned(comp || null);
-    broadcastPinned(next);
-    return next;
-  });
+  try {
+    handle(ipcMain, 'tft:setPinned', (_e, comp) => {
+      try {
+        const next = savePinned(comp || null);
+        broadcastPinned(next);
+        return next;
+      } catch {
+        return null;
+      }
+    });
+  } catch (err) {
+    console.error('[tft] tft:setPinned handle failed:', err);
+  }
 };
