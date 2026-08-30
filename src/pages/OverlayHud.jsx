@@ -939,6 +939,7 @@ const PREVIEW_TFT_COMP = {
   id: 'preview',
   name: 'Elderwood Aphelios',
   tier: 'S',
+  avgPlacement: 3.66,
   traits: [
     { id: 'elderwood', name: 'Elderwood', level: 2, icon: 'https://cdn.metatft.com/file/metatft/traits/da_18_elderwood.png' },
     { id: 'rapidfire', name: 'Rapidfire', level: 2, icon: 'https://cdn.metatft.com/file/metatft/traits/da_18_rapidfire.png' },
@@ -969,6 +970,54 @@ const PREVIEW_TFT_COMP = {
     },
     { id: 'd', name: 'Ornn', cost: 4, stars: 2, icon: 'https://cdn.metatft.com/file/metatft/champions/tft18_ornn.png', items: [] },
     { id: 'e', name: 'Braum', cost: 2, stars: 2, icon: 'https://cdn.metatft.com/file/metatft/champions/tft18_braum.png', items: [] },
+  ],
+  itemGuide: [
+    {
+      id: 'ie',
+      name: 'Infinity Edge',
+      icon: 'https://cdn.metatft.com/file/metatft/items/da_infinityedge.png',
+      avgPlacement: 3.72,
+      playCount: 412,
+      tier: 'S',
+      popularWith: [
+        { id: 'a', name: 'Aphelios', icon: 'https://cdn.metatft.com/file/metatft/champions/tft18_aphelios.png', cost: 4 },
+        { id: 'b', name: 'Ashe', icon: 'https://cdn.metatft.com/file/metatft/champions/tft18_ashe.png', cost: 2 },
+      ],
+    },
+    {
+      id: 'lw',
+      name: 'Last Whisper',
+      icon: 'https://cdn.metatft.com/file/metatft/items/da_lastwhisper.png',
+      avgPlacement: 3.81,
+      playCount: 288,
+      tier: 'A',
+      popularWith: [
+        { id: 'a', name: 'Aphelios', icon: 'https://cdn.metatft.com/file/metatft/champions/tft18_aphelios.png', cost: 4 },
+      ],
+    },
+    {
+      id: 'ga',
+      name: 'Giant Slayer',
+      icon: 'https://cdn.metatft.com/file/metatft/items/da_giantslayer.png',
+      avgPlacement: 3.88,
+      playCount: 241,
+      tier: 'A',
+      popularWith: [
+        { id: 'a', name: 'Aphelios', icon: 'https://cdn.metatft.com/file/metatft/champions/tft18_aphelios.png', cost: 4 },
+        { id: 'c', name: 'Gnar', icon: 'https://cdn.metatft.com/file/metatft/champions/tft18_gnar.png', cost: 3 },
+      ],
+    },
+    {
+      id: 'th',
+      name: "Titan's Resolve",
+      icon: 'https://cdn.metatft.com/file/metatft/items/da_titansresolve.png',
+      avgPlacement: 4.05,
+      playCount: 176,
+      tier: 'B',
+      popularWith: [
+        { id: 'c', name: 'Gnar', icon: 'https://cdn.metatft.com/file/metatft/champions/tft18_gnar.png', cost: 3 },
+      ],
+    },
   ],
   stages: [
     {
@@ -1153,6 +1202,98 @@ function TftCompOverlayPanel({
           ) : null}
         </>
       )}
+      {editing && <p className="ov-edit-hint">Drag this box · Ctrl+B to lock</p>}
+    </div>
+  );
+}
+
+function deriveItemGuide(comp) {
+  if (Array.isArray(comp?.itemGuide) && comp.itemGuide.length) return comp.itemGuide.slice(0, 4);
+  const byId = new Map();
+  for (const unit of comp?.units || []) {
+    for (const item of unit.items || []) {
+      const id = String(item.id || item.name || '');
+      if (!id) continue;
+      let rec = byId.get(id);
+      if (!rec) {
+        rec = {
+          id,
+          name: item.name || id,
+          icon: item.icon,
+          avgPlacement: item.avgPlacement ?? null,
+          playCount: Number(item.playCount) || 0,
+          popularWith: [],
+          tier: item.tier || '',
+        };
+        byId.set(id, rec);
+      }
+      if (unit.name && rec.popularWith.length < 5 && !rec.popularWith.some((u) => u.id === unit.id)) {
+        rec.popularWith.push({
+          id: unit.id,
+          name: unit.name,
+          icon: unit.icon,
+          cost: unit.cost,
+        });
+      }
+    }
+  }
+  return [...byId.values()].slice(0, 4);
+}
+
+function TftItemsOverlayPanel({
+  comp,
+  editing,
+  placeholder,
+  dragProps,
+}) {
+  const { t } = useI18n();
+  const shell = shellProps(editing);
+  const cards = deriveItemGuide(comp);
+
+  return (
+    <div className={`ov-tftitems${editing ? ' is-edit' : ''}`} {...shell} {...dragProps}>
+      <div className="ov-tftitems-filters">
+        <span>{t('overlays.tftItemsFilters')}</span>
+        <strong>{comp?.name || t('overlays.tftCompEmpty')}</strong>
+        {comp?.avgPlacement != null ? (
+          <em>{t('overlays.tftItemsCompAvg', { n: Number(comp.avgPlacement).toFixed(2) })}</em>
+        ) : null}
+        <i>{t('overlays.tftItemsStatic')}</i>
+      </div>
+      <div className="ov-tftitems-cards">
+        {placeholder || !cards.length ? (
+          <p className="ov-tftitems-empty">{t('overlays.tftItemsEmpty')}</p>
+        ) : cards.map((card) => (
+          <article key={card.id} className="ov-tftitems-card">
+            {card.tier ? <b className={`ov-tftitems-tier tier-${card.tier}`}>{card.tier}</b> : null}
+            <div className="ov-tftitems-icon">
+              {card.icon ? <img src={card.icon} alt="" /> : null}
+            </div>
+            <strong>{card.name}</strong>
+            <div className="ov-tftitems-stats">
+              <span>
+                <small>{t('overlays.tftItemsAvg')}</small>
+                {card.avgPlacement != null ? Number(card.avgPlacement).toFixed(2) : '—'}
+              </span>
+              <span>
+                <small>{t('overlays.tftItemsGames')}</small>
+                {card.playCount
+                  ? t('overlays.tftItemsGamesN', { n: card.playCount })
+                  : '—'}
+              </span>
+            </div>
+            <em className="ov-tftitems-pop">{t('overlays.tftItemsPopular')}</em>
+            <div className="ov-tftitems-champs">
+              {(card.popularWith || []).map((u) => (
+                <span key={u.id} title={u.name} className={`ov-tftcomp-unit cost-${u.cost || 1}`}>
+                  {u.icon ? <img src={u.icon} alt="" /> : <b>{(u.name || '?').slice(0, 1)}</b>}
+                </span>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+      <p className="ov-tftitems-cta">{t('overlays.tftItemsCta')}</p>
       {editing && <p className="ov-edit-hint">Drag this box · Ctrl+B to lock</p>}
     </div>
   );
@@ -1465,6 +1606,8 @@ function OverlayPanelPreviewInner({ id }) {
       return <ScoutOverlayPanel preview expanded editing={false} game={PREVIEW_SCOUT_GAME} />;
     case 'tftComp':
       return <TftCompOverlayPanel comp={PREVIEW_TFT_COMP} editing={false} />;
+    case 'tftItems':
+      return <TftItemsOverlayPanel comp={PREVIEW_TFT_COMP} editing={false} />;
     default:
       return <p className="ov-preview-note">{t('overlays.panelsNone')}</p>;
   }
@@ -1495,6 +1638,7 @@ export default function OverlayHud({ preview = false }) {
   const [winprobPos, setWinprobPos] = useState({ x: 18, y: 320 });
   const [scoutPos, setScoutPos] = useState({ x: 240, y: 40 });
   const [tftCompPos, setTftCompPos] = useState({ x: 18, y: 400 });
+  const [tftItemsPos, setTftItemsPos] = useState({ x: 72, y: 620 });
   const [winProbDismissed, setWinProbDismissed] = useState(false);
   const [scoutExpanded, setScoutExpanded] = useState(true);
   // Hidden until Ctrl+Shift+S; persisted in main across alt-tab remounts.
@@ -1594,6 +1738,7 @@ export default function OverlayHud({ preview = false }) {
       if (layout?.winprob) setWinprobPos(layout.winprob);
       if (layout?.scout) setScoutPos(layout.scout);
       if (layout?.tftComp) setTftCompPos(layout.tftComp);
+      if (layout?.tftItems) setTftItemsPos(layout.tftItems);
     });
     const offLayout = window.liveClient?.onLayout?.((layout) => {
       if (layout?.panels?.bench) setBenchPos(layout.panels.bench);
@@ -1604,6 +1749,7 @@ export default function OverlayHud({ preview = false }) {
       if (layout?.panels?.winprob) setWinprobPos(layout.panels.winprob);
       if (layout?.panels?.scout) setScoutPos(layout.panels.scout);
       if (layout?.panels?.tftComp) setTftCompPos(layout.panels.tftComp);
+      if (layout?.panels?.tftItems) setTftItemsPos(layout.panels.tftItems);
     });
     window.liveClient?.getVideoHint?.().then((v) => {
       if (v?.applyNow) setApplyHint('Esc → Video → Borderless → Apply');
@@ -1676,10 +1822,13 @@ export default function OverlayHud({ preview = false }) {
   const showSkill = panelEnabled('skill') && (editing || !!skillTip);
   const showWinProb = panelEnabled('winprob') && (editing || ((preview || snap.inGame) && !winProbDismissed && !!winProb));
   const showScout = panelEnabled('scout') && (editing || ((preview || snap.inGame) && !scoutDismissed));
-  // TFT has no Live Client API — detect via game window kind from the League watcher.
+  // TFT has no Live Client API — detect via the game window we attached to.
   const inTft = gameKind === 'tft';
-  // Static pin — show when pinned, editing, preview, or TFT match (prompt to pin).
-  const showTftComp = panelEnabled('tftComp') && (editing || preview || !!pinnedTftComp || inTft);
+  const inLeague = !preview && (gameKind === 'lol' || (!!snap?.inGame && !inTft));
+  // Pin is TFT-only. A leftover pin must not sit on a League match.
+  const showTftHud = !inLeague && (editing || preview || inTft || !!pinnedTftComp);
+  const showTftComp = panelEnabled('tftComp') && showTftHud;
+  const showTftItems = panelEnabled('tftItems') && showTftHud;
 
   return (
     <div className={`ov-root ov-stage${editing ? ' is-editing' : ''}`}>
@@ -1800,7 +1949,7 @@ export default function OverlayHud({ preview = false }) {
             </DraggablePanel>
           ) : null}
         </>
-      ) : showTftComp ? null : showBench && !inTft ? (
+      ) : (showTftComp || showTftItems) ? null : showBench && !inTft ? (
         <DraggablePanel id="bench" pos={benchPos} setPos={setBenchPos} editing={editing}>
           {(dragProps) => (
             <ToastShell
@@ -1825,6 +1974,19 @@ export default function OverlayHud({ preview = false }) {
               placeholder={(editing && !pinnedTftComp) || (inTft && !pinnedTftComp)}
               editing={editing}
               onUnpin={editing || !pinnedTftComp ? null : unpinTftComp}
+              dragProps={dragProps}
+            />
+          )}
+        </DraggablePanel>
+      ) : null}
+
+      {showTftItems ? (
+        <DraggablePanel id="tftItems" pos={tftItemsPos} setPos={setTftItemsPos} editing={editing}>
+          {(dragProps) => (
+            <TftItemsOverlayPanel
+              comp={pinnedTftComp}
+              placeholder={(editing && !pinnedTftComp) || (inTft && !pinnedTftComp)}
+              editing={editing}
               dragProps={dragProps}
             />
           )}

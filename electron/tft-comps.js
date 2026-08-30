@@ -40,6 +40,7 @@ function savePinned(comp) {
     traits: Array.isArray(comp.traits) ? comp.traits : [],
     units: Array.isArray(comp.units) ? comp.units : [],
     stages: Array.isArray(comp.stages) ? comp.stages : [],
+    itemGuide: Array.isArray(comp.itemGuide) ? comp.itemGuide : [],
     pinnedAt: Date.now(),
   };
   try { fs.writeFileSync(pinPath(), JSON.stringify(payload)); } catch { /* ignore */ }

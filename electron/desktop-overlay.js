@@ -1,6 +1,6 @@
 const { BrowserWindow, screen } = require('electron');
 const path = require('path');
-const { getLeagueBounds, startLeagueWatcher, stopLeagueWatcher } = require('./league-window');
+const { getLeagueBounds, peekLeagueBounds, startLeagueWatcher, stopLeagueWatcher } = require('./league-window');
 const { loadPos, savePos, savePanel } = require('./overlay-pos');
 
 let overlayWindow = null;
@@ -14,7 +14,8 @@ let attached = false;
 /** 'lol' | 'tft' | null — from the game window we pinned to. */
 let gameKind = null;
 let lastVideo = null;
-let unfocusedSince = 0;
+let gameFocused = false;
+let editArmedAt = 0;
 /** User enabled overlay in settings — window is created lazily when League is running. */
 let overlayWanted = false;
 let electronAppRef = null;
@@ -24,7 +25,7 @@ let onTopApplied = false;
 let onAttachChange = null;
 let onWindowReady = null;
 
-const HIDE_AFTER_MS = 700;
+const EDIT_FOCUS_GRACE_MS = 400;
 
 function setAttachListener(fn) {
   onAttachChange = typeof fn === 'function' ? fn : null;
@@ -112,6 +113,7 @@ function getPanels() {
     winprob: { ...panels.winprob },
     scout: { ...panels.scout },
     tftComp: { ...panels.tftComp },
+    tftItems: { ...panels.tftItems },
   };
 }
 
@@ -130,6 +132,7 @@ function clampPanelsToSize(width, height) {
     winprob: clamp(cur.winprob),
     scout: clamp(cur.scout),
     tftComp: clamp(cur.tftComp),
+    tftItems: clamp(cur.tftItems),
   };
   if (
     next.bench.x === cur.bench.x && next.bench.y === cur.bench.y
@@ -140,6 +143,7 @@ function clampPanelsToSize(width, height) {
     && next.winprob.x === cur.winprob.x && next.winprob.y === cur.winprob.y
     && next.scout.x === cur.scout.x && next.scout.y === cur.scout.y
     && next.tftComp.x === cur.tftComp.x && next.tftComp.y === cur.tftComp.y
+    && next.tftItems.x === cur.tftItems.x && next.tftItems.y === cur.tftItems.y
   ) {
     return cur;
   }
@@ -161,6 +165,7 @@ function setPanel(id, point) {
 
 function setEditing(on) {
   editing = !!on;
+  if (editing) editArmedAt = Date.now();
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   applyFocusable();
   applyClickThrough();
@@ -169,6 +174,16 @@ function setEditing(on) {
     try { overlayWindow.focus(); } catch { /* ignore */ }
   }
   sendLayout();
+}
+
+function isOverlayWindowFocused() {
+  return !!(overlayWindow && !overlayWindow.isDestroyed() && overlayWindow.isFocused());
+}
+
+function isGameFocused() {
+  const latest = peekLeagueBounds();
+  if (latest && typeof latest.focused === 'boolean') return !!latest.focused;
+  return !!gameFocused;
 }
 
 function toDipRect(bounds) {
@@ -221,6 +236,7 @@ function destroyOverlaySurface() {
 
 /** Tear down the GPU layer while keeping overlay armed — cursor goes back to normal. */
 function hideOverlay() {
+  gameFocused = false;
   setAttachedState(false, null);
   lastPos = '';
   onTopApplied = false;
@@ -288,30 +304,27 @@ function ensureOverlayWindow() {
 
 function pinToLeague(bounds) {
   if (!overlayWanted) return;
+  if (!bounds) return;
 
   const leagueFocused = !!bounds?.focused;
   const gameRunning = !!bounds?.running;
   const hasGame = !!(bounds?.hasRect && gameRunning);
-  const keepForEdit = editing && gameRunning;
+  gameFocused = leagueFocused;
+  const overlayFocused = isOverlayWindowFocused();
+  const editFocusGrace = editing && (Date.now() - editArmedAt) < EDIT_FOCUS_GRACE_MS;
+  const keepVisible = leagueFocused || overlayFocused || editFocusGrace;
 
   if (hasGame) {
     const gameDip = leagueDipRect(bounds);
     if (gameDip) lastLeagueDip = gameDip;
   }
 
-  if (!leagueFocused && !keepForEdit) {
-    if (!unfocusedSince) unfocusedSince = Date.now();
-    if (Date.now() - unfocusedSince < HIDE_AFTER_MS) {
-      if (!gameRunning) return;
-    } else {
-      hideOverlay();
-      return;
-    }
-  } else {
-    unfocusedSince = 0;
+  if (!keepVisible) {
+    hideOverlay();
+    return;
   }
 
-  if (!gameRunning && !keepForEdit) {
+  if (!gameRunning && !overlayFocused && !editFocusGrace) {
     hideOverlay();
     return;
   }
@@ -364,7 +377,7 @@ function startFollow() {
     pinToLeague(bounds);
   };
   tick();
-  followTimer = setInterval(tick, 1200);
+  followTimer = setInterval(tick, 200);
 }
 
 function stopFollow() {
@@ -436,6 +449,8 @@ module.exports = {
   setPanels,
   setPanel,
   isAttached: () => ({ attached, kind: gameKind }),
+  isGameFocused,
+  isOverlayFocused: isOverlayWindowFocused,
   getGameKind: () => gameKind,
   setAttachListener,
   setWindowReadyListener,

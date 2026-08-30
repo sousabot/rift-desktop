@@ -6,6 +6,7 @@ const os = require('os');
 const { publicError } = require('./safe-error');
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const UNITS_VERSION = 5;
 const HC = 'https://api-hc.metatft.com';
 const CDN = 'https://cdn.metatft.com/file/metatft';
 
@@ -39,7 +40,7 @@ function snapshotResult() {
     source: 'snapshot',
     comps: snap.comps,
     units: Array.isArray(snap.units) ? snap.units : [],
-    unitsVersion: snap.unitsVersion || 4,
+    unitsVersion: snap.unitsVersion || UNITS_VERSION,
     cached: true,
     stale: true,
     error: null,
@@ -105,6 +106,60 @@ function unitIcon(apiName) {
 function itemIcon(itemId) {
   const key = String(itemId || '').toLowerCase();
   return key ? `${CDN}/items/${key}.png` : '';
+}
+
+function prettyItemName(itemId) {
+  return String(itemId || '')
+    .replace(/^DA_/, '')
+    .replace(/^\d+_/, '')
+    .replace(/^TFT\d*_Item_/, '')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .trim();
+}
+
+function buildItemGuide(units, limit = 4) {
+  const byId = new Map();
+  for (const unit of units || []) {
+    for (const item of unit.items || []) {
+      const id = String(item.id || '');
+      if (!id) continue;
+      let rec = byId.get(id);
+      if (!rec) {
+        rec = {
+          id,
+          name: item.name || prettyItemName(id),
+          icon: item.icon || itemIcon(id),
+          avgPlacement: item.avgPlacement ?? null,
+          playCount: Number(item.playCount) || 0,
+          popularWith: [],
+        };
+        byId.set(id, rec);
+      }
+      if (item.avgPlacement != null) {
+        rec.avgPlacement = rec.avgPlacement == null
+          ? Number(item.avgPlacement)
+          : Math.min(rec.avgPlacement, Number(item.avgPlacement));
+      }
+      rec.playCount = Math.max(rec.playCount, Number(item.playCount) || 0);
+      if (unit.name && rec.popularWith.length < 5 && !rec.popularWith.some((u) => u.id === unit.id)) {
+        rec.popularWith.push({
+          id: unit.id,
+          name: unit.name,
+          icon: unit.icon,
+          cost: unit.cost,
+        });
+      }
+    }
+  }
+  return [...byId.values()]
+    .sort((a, b) => (b.playCount - a.playCount) || ((a.avgPlacement ?? 99) - (b.avgPlacement ?? 99)))
+    .slice(0, limit)
+    .map((row) => ({
+      ...row,
+      avgPlacement: row.avgPlacement != null ? Math.round(row.avgPlacement * 100) / 100 : null,
+      tier: tierFromAvg(row.avgPlacement),
+    }));
 }
 
 function traitIcon(apiName, name) {
@@ -174,20 +229,91 @@ function buildUnitsCatalog(unitLookup) {
     .sort((a, b) => a.cost - b.cost || a.name.localeCompare(b.name));
 }
 
-function parseTraitToken(token, traitLookup) {
-  const raw = String(token || '').trim();
-  if (!raw) return null;
-  const m = raw.match(/^(.*)_(\d+)$/);
-  const asset = m ? m[1] : raw;
-  const level = m ? Number(m[2]) : 1;
-  const info = traitLookup?.[asset] || {};
+function indexTraits(traitLookup) {
+  const byId = traitLookup && typeof traitLookup === 'object' ? traitLookup : {};
+  const byName = new Map();
+  for (const [id, info] of Object.entries(byId)) {
+    const name = String(info?.name || '').trim().toLowerCase();
+    if (name) byName.set(name, { id, info });
+  }
+  return { byId, byName };
+}
+
+function highestBreakpoint(info, count) {
+  const levels = Array.isArray(info?.levels) ? info.levels : [];
+  let best = null;
+  for (const row of levels) {
+    const need = Number(row?.num);
+    if (!Number.isFinite(need) || count < need) continue;
+    if (!best || need >= Number(best.num)) best = row;
+  }
+  return best;
+}
+
+function traitRecord(id, info, count, fallbackName) {
+  const active = highestBreakpoint(info, count);
+  if (!active) return null;
   return {
-    id: asset,
-    apiName: info.apiName || asset,
-    name: info.name || asset.replace(/^DA_(\d+_)?/, '').replace(/18$/, ''),
-    level: Number.isFinite(level) ? level : 1,
-    icon: traitIcon(asset, info.name),
+    id,
+    apiName: info?.apiName || id,
+    name: info?.name || fallbackName || id.replace(/^DA_(\d+_)?/, '').replace(/18$/, ''),
+    level: count,
+    style: Number(active.style) || 1,
+    active: true,
+    icon: traitIcon(id, info?.name),
   };
+}
+
+function traitsFromBoard(unitIds, unitLookup, traitLookup) {
+  const { byId, byName } = indexTraits(traitLookup);
+  const counts = new Map();
+  for (const assetId of unitIds || []) {
+    const raw = unitLookup?.[assetId];
+    for (const token of raw?.traits || []) {
+      const key = String(token || '').trim();
+      if (!key) continue;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  const out = [];
+  for (const [label, count] of counts) {
+    const hit = byName.get(label.toLowerCase())
+      || (byId[label] ? { id: label, info: byId[label] } : null);
+    if (!hit) continue;
+    const rec = traitRecord(hit.id, hit.info, count, label);
+    if (rec) out.push(rec);
+  }
+  out.sort((a, b) => (b.level - a.level) || a.name.localeCompare(b.name));
+  return out;
+}
+
+function traitsFromString(raw, traitLookup) {
+  const { byId } = indexTraits(traitLookup);
+  return String(raw || '')
+    .split(',')
+    .map((token) => {
+      const text = token.trim();
+      if (!text) return null;
+      const m = text.match(/^(.*)_(\d+)$/);
+      const asset = m ? m[1] : text;
+      const count = m ? Number(m[2]) : 1;
+      return traitRecord(asset, byId[asset] || {}, count);
+    })
+    .filter(Boolean)
+    .sort((a, b) => (b.level - a.level) || a.name.localeCompare(b.name));
+}
+
+function resolveBuilds(builds, assetId, apiName) {
+  if (!builds || typeof builds.get !== 'function') return null;
+  return builds.get(assetId) || builds.get(apiName) || null;
+}
+
+function carryBuilds(builds, limit = 3) {
+  if (!builds || typeof builds.entries !== 'function') return null;
+  const ranked = [...builds.entries()]
+    .sort((a, b) => (b[1].score - a[1].score) || (b[1].count - a[1].count))
+    .slice(0, limit);
+  return ranked.length ? new Map(ranked) : null;
 }
 
 function displayName(cluster, unitLookup, traitLookup) {
@@ -224,7 +350,7 @@ function bestBuildsByUnit(buildsForCluster) {
     const count = Number(row.count) || 0;
     if (!prev || score > prev.score || (score === prev.score && count > prev.count)) {
       best.set(unit, {
-        items: row.buildName.map(String),
+        items: row.buildName.map(String).slice(0, 3),
         score,
         count,
         avg: Number(row.avg) || null,
@@ -244,11 +370,13 @@ function normalizeUnit(assetId, unitLookup, builds, { shopOnly = false } = {}) {
     if (junk.test(assetId) || junk.test(api) || junk.test(name)) return null;
     if (!Array.isArray(u.traits) || u.traits.length === 0) return null;
   }
-  const build = builds?.get?.(assetId);
-  const items = (build?.items || []).map((itemId) => ({
+  const build = resolveBuilds(builds, assetId, u.apiName || assetId);
+  const items = (build?.items || []).slice(0, 3).map((itemId) => ({
     id: itemId,
-    name: String(itemId).replace(/^DA_/, '').replace(/^TFT_Item_/, ''),
+    name: prettyItemName(itemId),
     icon: itemIcon(itemId),
+    avgPlacement: build?.avg ?? null,
+    playCount: build?.count ?? 0,
   }));
   const cost = Number(u.unit_cost) || 0;
   return {
@@ -298,6 +426,12 @@ function pickBestBoardOption(list) {
   })[0];
 }
 
+function capBoard(units, level) {
+  const n = Number(level);
+  if (!Number.isFinite(n) || n < 1 || !Array.isArray(units) || units.length <= n) return units || [];
+  return units.slice(0, n);
+}
+
 function buildStages(earlyOptions, lateOptions, finalUnits, unitLookup, builds) {
   const stages = [];
   const early = earlyOptions && typeof earlyOptions === 'object' ? earlyOptions : {};
@@ -308,7 +442,7 @@ function buildStages(earlyOptions, lateOptions, finalUnits, unitLookup, builds) 
     const best = pickBestBoardOption(early[String(lvl)]);
     if (!best) continue;
     const list = best.unit_list || best.units_list;
-    const units = unitsFromDelimitedList(list, unitLookup, builds, shopOpts);
+    const units = capBoard(unitsFromDelimitedList(list, unitLookup, null, shopOpts), lvl);
     if (!units.length) continue;
     stages.push({
       level: lvl,
@@ -320,13 +454,13 @@ function buildStages(earlyOptions, lateOptions, finalUnits, unitLookup, builds) 
     });
   }
 
-  // MetaTFT rarely has Lvl 3 — seed an "openers" board from cheapest Lvl 4 shop units.
+  // MetaTFT rarely has Lvl 3 — seed an opener from the cheapest Lvl 4 shop units.
   if (!stages.some((s) => s.level === 3)) {
     const lvl4 = stages.find((s) => s.level === 4);
     if (lvl4?.units?.length) {
       const openers = [...lvl4.units]
         .sort((a, b) => (a.cost - b.cost) || a.name.localeCompare(b.name))
-        .slice(0, 4)
+        .slice(0, 3)
         .map((u) => ({ ...u, stars: 2, items: [] }));
       if (openers.length) {
         stages.unshift({
@@ -345,12 +479,15 @@ function buildStages(earlyOptions, lateOptions, finalUnits, unitLookup, builds) 
     if (stages.some((s) => s.level === lvl)) continue;
     const best = pickBestBoardOption(late[String(lvl)]);
     if (!best) continue;
-    const units = unitsFromDelimitedList(best.units_list || best.unit_list, unitLookup, builds, shopOpts);
+    const units = capBoard(
+      unitsFromDelimitedList(best.units_list || best.unit_list, unitLookup, builds, shopOpts),
+      lvl,
+    );
     if (!units.length) continue;
     stages.push({
       level: lvl,
       label: `Lvl ${lvl}`,
-      winRate: null,
+      winRate: best.win != null ? Math.round(Number(best.win) * 1000) / 1000 : null,
       avgPlacement: best.avg != null ? Math.round(Number(best.avg) * 100) / 100 : null,
       playCount: Number(best.count) || 0,
       units,
@@ -429,17 +566,14 @@ async function fetchFresh() {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    const builds = bestBuildsByUnit(buildsRoot[id]);
+    const builds = carryBuilds(bestBuildsByUnit(buildsRoot[id]));
 
     const units = unitIds
       .map((assetId) => normalizeUnit(assetId, unitLookup, builds))
       .filter(Boolean);
 
-    const traits = String(cluster.traits_string || '')
-      .split(',')
-      .map((t) => parseTraitToken(t.trim(), traitLookup))
-      .filter(Boolean)
-      .sort((a, b) => (b.level || 0) - (a.level || 0));
+    const traits = traitsFromBoard(unitIds, unitLookup, traitLookup);
+    if (!traits.length) traits.push(...traitsFromString(cluster.traits_string, traitLookup));
 
     const avgPlacement = stats.avgPlacement;
     const playCount = stats.playCount || 0;
@@ -456,6 +590,7 @@ async function fetchFresh() {
       traits,
       units,
       stages,
+      itemGuide: buildItemGuide(units),
     };
   });
 
@@ -475,14 +610,14 @@ async function fetchFresh() {
     source: 'metatft',
     comps,
     units: unitsCatalog,
-    unitsVersion: 4,
+    unitsVersion: UNITS_VERSION,
     error: null,
   };
 }
 
 async function getTftComps({ force = false } = {}) {
   const now = Date.now();
-  if (!force && memory.data?.comps?.length && memory.data.unitsVersion === 4 && Array.isArray(memory.data.units) && now - memory.at < CACHE_TTL_MS) {
+  if (!force && memory.data?.comps?.length && memory.data.unitsVersion === UNITS_VERSION && Array.isArray(memory.data.units) && now - memory.at < CACHE_TTL_MS) {
     return { ...memory.data, cached: true };
   }
 
@@ -490,7 +625,7 @@ async function getTftComps({ force = false } = {}) {
     const disk = readDisk();
     if (
       disk?.data?.comps?.length
-      && disk.data.unitsVersion === 4
+      && disk.data.unitsVersion === UNITS_VERSION
       && Array.isArray(disk.data.units)
       && disk.at
       && now - disk.at < CACHE_TTL_MS

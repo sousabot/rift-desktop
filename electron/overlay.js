@@ -55,6 +55,12 @@ function syncScoutGame(_inGame) {
   return { dismissed: scoutDismissed };
 }
 
+function overlayHotkeyLive() {
+  if (!isOverlayOpen()) return false;
+  if (desktop.isGameFocused()) return true;
+  return editing && desktop.isOverlayFocused();
+}
+
 function syncDesktopHotkey() {
   for (const accel of [EDIT_ACCEL, SCOUT_ACCEL]) {
     try { globalShortcut.unregister(accel); } catch { /* ignore */ }
@@ -62,10 +68,10 @@ function syncDesktopHotkey() {
   if (!isOverlayOpen()) return;
   try {
     globalShortcut.register(EDIT_ACCEL, () => {
-      if (isOverlayOpen()) toggleEditMode();
+      if (overlayHotkeyLive()) toggleEditMode();
     });
     globalShortcut.register(SCOUT_ACCEL, () => {
-      if (isOverlayOpen()) emitScoutToggle();
+      if (overlayHotkeyLive()) emitScoutToggle();
     });
   } catch (err) {
     console.warn('[overlay] overlay hotkeys failed', err?.message || err);
@@ -75,10 +81,10 @@ function syncDesktopHotkey() {
 function startEditHotkeys() {
   editHotkey.start(
     () => {
-      if (isOverlayOpen()) toggleEditMode();
+      if (overlayHotkeyLive()) toggleEditMode();
     },
     () => {
-      if (isOverlayOpen()) emitScoutToggle();
+      if (overlayHotkeyLive()) emitScoutToggle();
     },
   );
   syncDesktopHotkey();
@@ -90,8 +96,8 @@ function toggleEditMode(force) {
   if (typeof force !== 'boolean' && now - lastToggleAt < 320) return editing;
 
   const next = typeof force === 'boolean' ? force : !editing;
-  // Only unlock HUD while League is actually attached — not with client closed.
-  if (next && !desktop.isAttached()) {
+  // Only unlock the HUD while League/TFT is the focused window.
+  if (next && !desktop.isGameFocused() && !desktop.isOverlayFocused()) {
     if (editing) {
       editing = false;
       desktop.setEditing(false);

@@ -20,7 +20,10 @@ export default function UpdateBanner() {
   let text = t('update.available', { version });
   let action = t('update.update');
   if (status.state === 'error') {
-    text = status.portable ? t('update.portable') : (status.blocked ? t('update.blocked') : (status.message || t('update.fail')));
+    if (status.portable) text = t('update.portable');
+    else if (status.blocked || status.reason === 'blocked') text = t('update.blocked');
+    else if (status.reason === 'timeout') text = t('update.timeout');
+    else text = t('update.fail');
     action = t('update.getSetup');
   } else if (status.state === 'downloading') {
     text = t('update.downloading', { version, percent: status.percent || 0 });

@@ -185,10 +185,8 @@
 }
 
 .ovp-gallery--overlays {
-  grid-template-columns: 1.35fr 1fr 1fr;
-  grid-template-areas:
-    'hero skill scout'
-    'hero tft  scout';
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
 }
 
 .ovp-gallery--notify {
@@ -198,10 +196,6 @@
     'obj     obj     items';
 }
 
-.ovp-tile--id-bench { grid-area: hero; }
-.ovp-tile--id-skill { grid-area: skill; }
-.ovp-tile--id-scout { grid-area: scout; }
-.ovp-tile--id-tftComp { grid-area: tft; }
 .ovp-tile--id-items { grid-area: items; }
 .ovp-tile--id-winprob { grid-area: winprob; }
 .ovp-tile--id-trinket { grid-area: trinket; }
@@ -211,7 +205,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 180px;
+  min-height: 0;
+  width: 100%;
   border-radius: 18px;
   overflow: hidden;
   background:
@@ -249,22 +244,23 @@
 }
 
 .ovp-tile-visual {
-  flex: 1;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 22px 16px 10px;
-  min-height: 140px;
+  padding: 16px 14px 8px;
+  min-height: 0;
   overflow: hidden;
   pointer-events: none;
 }
 
-.ovp-tile-visual--bench { align-items: flex-end; }
+.ovp-tile-visual--bench { align-items: center; }
 .ovp-tile-visual--items { align-items: center; }
 .ovp-tile-visual--scout {
   align-items: stretch;
   justify-content: stretch;
   padding: 16px 12px 8px;
+  max-height: none;
 }
 .ovp-tile-visual--scout .ov-panel-preview {
   width: 100%;
@@ -364,6 +360,7 @@
   .ovp-tile--id-skill,
   .ovp-tile--id-scout,
   .ovp-tile--id-tftComp,
+  .ovp-tile--id-tftItems,
   .ovp-tile--id-items,
   .ovp-tile--id-winprob,
   .ovp-tile--id-trinket,

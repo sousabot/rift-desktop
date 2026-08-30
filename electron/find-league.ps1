@@ -34,11 +34,7 @@ public class GdFind {
     var lolPids = ParsePids(lolPidsCsv);
     var tftPids = ParsePids(tftPidsCsv);
     IntPtr fg = GetForegroundWindow();
-    if (fg == IntPtr.Zero) {
-      if (tftPids.Count > 0) return 2;
-      if (lolPids.Count > 0) return 1;
-      return 0;
-    }
+    if (fg == IntPtr.Zero) return 0;
     uint pid;
     GetWindowThreadProcessId(fg, out pid);
     if (tftPids.Contains(pid)) return 2;

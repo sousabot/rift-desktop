@@ -63,8 +63,12 @@ function ItemStrip({ items }) {
 }
 
 function TraitChip({ trait }) {
+  const style = Number(trait.style) || (trait.active ? 1 : 0);
   return (
-    <span className="tft-trait" title={`${trait.name} ${trait.level || ''}`.trim()}>
+    <span
+      className={`tft-trait${trait.active || style ? ' is-on' : ''} style-${style || 'off'}`}
+      title={`${trait.name} ${trait.level || ''}`.trim()}
+    >
       {trait.icon ? <img src={trait.icon} alt="" /> : null}
       <em>{trait.name}</em>
       {trait.level ? <b>{trait.level}</b> : null}

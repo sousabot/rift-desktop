@@ -38,6 +38,24 @@ function looksBlocked(err) {
   return /not signed|code signature|publisher|eperm|eacces|blocked|defender|smartscreen|virus|quarantine|operation not permitted|spawn unknown|errno:\s*-4048|checksum|sha512|enoent|cannot find downloaded/.test(m);
 }
 
+function classifyUpdateError(err) {
+  if (looksBlocked(err)) return 'blocked';
+  const m = String(err?.message || err || '');
+  if (/504|502|503|gateway time-?out|timed? ?out|etimedout|econnreset|enotfound|socket hang up|eai_again|network/i.test(m)) {
+    return 'timeout';
+  }
+  return 'fail';
+}
+
+function errorPayload(err) {
+  const reason = classifyUpdateError(err);
+  return {
+    state: 'error',
+    blocked: reason === 'blocked',
+    reason,
+  };
+}
+
 async function withReleaseLinks(payload) {
   try {
     const remote = await latestGithubRelease();
@@ -120,7 +138,7 @@ function register({ getWindow, prepareQuit }) {
           send({ state: 'current', version: app.getVersion() });
         }
       } catch (err) {
-        send({ state: 'error', message: err.message || 'Could not check for updates.' });
+        send(errorPayload(err));
       }
       return last;
     };
@@ -138,7 +156,7 @@ function register({ getWindow, prepareQuit }) {
   try {
     updater = require('electron-updater').autoUpdater;
   } catch (err) {
-    send({ state: 'error', message: err.message || 'Updater missing.' });
+    send(errorPayload(err));
     ipcMain.handle('update:check', async () => last);
     ipcMain.handle('update:install', () => ({ ok: false }));
     return;
@@ -171,12 +189,8 @@ function register({ getWindow, prepareQuit }) {
     downloadedFile: info.downloadedFile || null,
   }));
   updater.on('error', (err) => {
-    withReleaseLinks({
-      state: 'error',
-      blocked: looksBlocked(err),
-      message: err?.message || 'Update failed.',
-    }).then(send).catch(() => {
-      send({ state: 'error', blocked: looksBlocked(err), message: err?.message || 'Update failed.' });
+    withReleaseLinks(errorPayload(err)).then(send).catch(() => {
+      send(errorPayload(err));
     });
   });
 
@@ -184,11 +198,7 @@ function register({ getWindow, prepareQuit }) {
     try {
       await updater.checkForUpdates();
     } catch (err) {
-      send(await withReleaseLinks({
-        state: 'error',
-        blocked: looksBlocked(err),
-        message: err.message || 'Could not check for updates.',
-      }));
+      send(await withReleaseLinks(errorPayload(err)));
     }
     return last;
   };

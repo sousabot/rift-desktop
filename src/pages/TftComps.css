@@ -562,6 +562,12 @@
 }
 .tft-trait em { font-style: normal; color: var(--rift-text-primary); }
 .tft-trait b { color: var(--rift-text-muted); font-weight: 700; }
+.tft-trait.is-on { background: rgba(86, 168, 255, 0.08); border-color: rgba(86, 168, 255, 0.2); }
+.tft-trait.style-1 b { color: #c4a574; }
+.tft-trait.style-3 b { color: #c5ccd8; }
+.tft-trait.style-4 b { color: #e0b020; }
+.tft-trait.style-5 b,
+.tft-trait.style-6 b { color: #7eb6ff; }
 
 .tft-detail-units {
   display: grid;

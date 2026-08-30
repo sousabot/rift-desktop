@@ -11,6 +11,7 @@ const DEFAULT = {
   winprob: true,
   scout: true,
   tftComp: true,
+  tftItems: true,
 };
 
 const PANEL_IDS = new Set(Object.keys(DEFAULT));

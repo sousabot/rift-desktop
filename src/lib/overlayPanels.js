@@ -9,6 +9,7 @@ export const DEFAULT_OVERLAY_PANELS = {
   winprob: true,
   scout: true,
   tftComp: true,
+  tftItems: true,
 };
 
 /** Gallery metadata for the Overlays settings page (DPM-style cards). */
@@ -16,7 +17,7 @@ export const OVERLAY_PANEL_LIST = [
   {
     id: 'bench',
     section: 'overlays',
-    size: 'hero',
+    size: 'sm',
     titleKey: 'overlays.benchTitle',
     descKey: 'overlays.panelDesc.bench',
     preview: 'bench',
@@ -44,6 +45,14 @@ export const OVERLAY_PANEL_LIST = [
     titleKey: 'overlays.tftCompTitle',
     descKey: 'overlays.panelDesc.tftComp',
     preview: 'tftComp',
+  },
+  {
+    id: 'tftItems',
+    section: 'overlays',
+    size: 'md',
+    titleKey: 'overlays.tftItemsTitle',
+    descKey: 'overlays.panelDesc.tftItems',
+    preview: 'tftItems',
   },
   {
     id: 'items',

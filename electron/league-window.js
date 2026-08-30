@@ -81,9 +81,13 @@ function startLeagueWatcher() {
   });
 }
 
+function peekLeagueBounds() {
+  return latest;
+}
+
 function getLeagueBounds() {
   startLeagueWatcher();
   return Promise.resolve(latest);
 }
 
-module.exports = { getLeagueBounds, startLeagueWatcher, stopLeagueWatcher };
+module.exports = { getLeagueBounds, peekLeagueBounds, startLeagueWatcher, stopLeagueWatcher };

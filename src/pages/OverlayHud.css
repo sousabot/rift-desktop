@@ -953,6 +953,156 @@ html.rift-overlay #root {
   color: #8e9bc0;
 }
 
+.ov-tftitems {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  min-width: 720px;
+  max-width: 920px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(10, 12, 18, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  color: #f4f6fb;
+}
+.ov-tftitems-filters {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  width: 132px;
+  flex-shrink: 0;
+  padding-right: 8px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ov-tftitems-filters span,
+.ov-tftitems-filters i {
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8e9bc0;
+}
+.ov-tftitems-filters strong {
+  font-size: 13px;
+  line-height: 1.25;
+}
+.ov-tftitems-filters em {
+  font-style: normal;
+  font-size: 11px;
+  color: #c9d2e8;
+}
+.ov-tftitems-cards {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+.ov-tftitems-empty {
+  margin: auto;
+  font-size: 12px;
+  color: #8e9bc0;
+}
+.ov-tftitems-card {
+  position: relative;
+  flex: 1;
+  min-width: 118px;
+  padding: 8px 8px 7px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.ov-tftitems-tier {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  min-width: 16px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.ov-tftitems-tier.tier-S { color: #ffd76a; background: rgba(255, 215, 106, 0.2); }
+.ov-tftitems-tier.tier-A { color: #9ad0ff; background: rgba(154, 208, 255, 0.16); }
+.ov-tftitems-tier.tier-B { color: #b8f0c0; background: rgba(184, 240, 192, 0.14); }
+.ov-tftitems-icon {
+  width: 36px;
+  height: 36px;
+  margin: 2px auto 6px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #10131a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.ov-tftitems-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ov-tftitems-card > strong {
+  display: block;
+  font-size: 11px;
+  text-align: center;
+  line-height: 1.2;
+  margin-bottom: 6px;
+}
+.ov-tftitems-stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.ov-tftitems-stats span {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  font-weight: 700;
+}
+.ov-tftitems-stats small {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8e9bc0;
+}
+.ov-tftitems-pop {
+  display: block;
+  font-size: 9px;
+  font-style: normal;
+  color: #8e9bc0;
+  margin-bottom: 4px;
+}
+.ov-tftitems-champs {
+  display: flex;
+  gap: 3px;
+}
+.ov-tftitems-champs .ov-tftcomp-unit {
+  width: 22px;
+  height: 22px;
+}
+.ov-tftitems-cta {
+  width: 88px;
+  flex-shrink: 0;
+  margin: auto 0;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.25;
+  color: #fff;
+}
+.ov-panel-preview--tftItems {
+  min-width: 0;
+  overflow: hidden;
+}
+.ov-panel-preview--tftItems .ov-tftitems {
+  min-width: 0;
+  max-width: none;
+  transform: scale(0.72);
+  transform-origin: top left;
+}
+
 .ov-preview-note {
   margin: 0;
   font-size: 12px;
