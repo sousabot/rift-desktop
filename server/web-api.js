@@ -395,6 +395,25 @@ function registerWebApi(router) {
     return getLiveGame(riotFetch, { gameName, tagLine, platform, region });
   });
 
+  router.get('/v1/web/match-lp', async (req, url) => {
+    const gameName = clip(url.searchParams.get('gameName') || url.searchParams.get('name') || '', 40);
+    const tagLine = clip(url.searchParams.get('tagLine') || url.searchParams.get('tag') || '', 16);
+    const platform = clip(url.searchParams.get('platform') || 'euw1', 12) || 'euw1';
+    const queue = Number(url.searchParams.get('queue') || 420);
+    if (!gameName || !tagLine) {
+      const err = new Error('Name#TAG is required.');
+      err.status = 400;
+      throw err;
+    }
+    const { fetchMatchLp } = require('./ugg-lp');
+    const lp = await fetchMatchLp({
+      riotId: `${gameName}#${tagLine}`,
+      platform,
+      queue: queue === 440 ? 440 : 420,
+    });
+    return { ok: true, lp };
+  });
+
   router.get('/v1/web/match-timeline', async (req, url, riotFetch) => {
     const matchId = clip(url.searchParams.get('matchId') || '', 64);
     const region = clip(url.searchParams.get('region') || 'europe', 16) || 'europe';

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { getCareerSidebar, getDashboard, getLiveGame, lookupPro } from '../api';
+import { getCareerSidebar, getDashboard, getLiveGame, getMatchLp, lookupPro } from '../api';
+import { applyTrackedLp, formatLpDelta, syncMatchLp } from '../lib/lpHistory';
 import { useSession } from '../session';
 import {
   champIconUrl,
@@ -22,10 +23,7 @@ import {
 import MatchExpand from './MatchExpand';
 import {
   CollectionsCard,
-  HourHeatmap,
-  InsightsCard,
   LensCard,
-  LpChart,
   PhaseCard,
   ProChip,
   StatGrid,
@@ -41,6 +39,28 @@ const ROLE_FILTERS = [
   { key: 'BOTTOM', label: 'Bot' },
   { key: 'UTILITY', label: 'Sup' },
 ];
+
+function rankedQueue(mode) {
+  if (mode === 'Flex') return 440;
+  if (mode === 'Solo') return 420;
+  return null;
+}
+
+function attachLocalLp(data, selectedMode) {
+  if (!data) return data;
+  const queue = rankedQueue(selectedMode);
+  const ranked = selectedMode === 'Flex' ? data.flex : data.solo;
+  const games = syncMatchLp({
+    riotId: data.riotId,
+    mode: selectedMode,
+    lp: ranked?.lp ?? data.lp,
+    tier: ranked?.rankTier ?? data.rankTier,
+    division: ranked?.rankDivision ?? data.rankDivision,
+    games: data.recentGames || [],
+    queueId: queue,
+  });
+  return { ...data, recentGames: games };
+}
 
 function WinDonut({ winrate = 0, wins = 0, losses = 0 }) {
   const size = 84;
@@ -572,6 +592,14 @@ function MatchRow({ game, version, runeIndex, expanded, onToggle, puuid, onHydra
           <span className={`wd-match-result ${game.win ? 'win' : 'loss'}`}>
             {game.win ? 'Victory' : 'Defeat'}
           </span>
+          {formatLpDelta(game.lpDelta, game.lpDeltaEst) ? (
+            <span
+              className={`wd-match-lp ${game.lpDelta > 0 ? 'is-up' : 'is-down'}`}
+              title={game.lpDeltaEst ? 'Typical LP for this rank — Riot does not publish the exact swing' : 'LP this game'}
+            >
+              {formatLpDelta(game.lpDelta, game.lpDeltaEst)}
+            </span>
+          ) : null}
           <span>{game.queueLabel || 'Solo/Duo'}</span>
           <span>{game.ago}</span>
           <span>
@@ -663,6 +691,7 @@ export default function Dashboard() {
   const [careerLoading, setCareerLoading] = useState(false);
   const [careerError, setCareerError] = useState(false);
   const loadSeq = useRef(0);
+  const lpTried = useRef('');
 
   useEffect(() => {
     ddragonVersion().then(setVersion);
@@ -696,7 +725,7 @@ export default function Dashboard() {
       return;
     }
     try {
-      const data = await getDashboard({
+      const fetchDash = () => getDashboard({
         gameName: parsed.gameName,
         tagLine: parsed.tagLine,
         platform: lookup.platform,
@@ -704,8 +733,17 @@ export default function Dashboard() {
         mode: selectedMode,
         count: 20,
       });
+      let data = await fetchDash();
+      const rankedPlayed = (Number(data?.solo?.wins) || 0) + (Number(data?.solo?.losses) || 0)
+        + (Number(data?.flex?.wins) || 0) + (Number(data?.flex?.losses) || 0);
+      // Ranks can land while match-v5 is rate-limited — retry instead of showing 0 games.
+      if (!(data?.recentGames || []).length && rankedPlayed > 0) {
+        await new Promise((r) => setTimeout(r, 2500));
+        if (reqId !== loadSeq.current) return;
+        data = await fetchDash();
+      }
       if (reqId !== loadSeq.current) return;
-      setProfile(data);
+      setProfile(attachLocalLp(data, selectedMode));
       if (data.ddragonVersion) setVersion(data.ddragonVersion);
     } catch (err) {
       if (reqId !== loadSeq.current) return;
@@ -723,7 +761,7 @@ export default function Dashboard() {
 
   // Career Role / Played With / Pings — delayed so match history can finish first.
   useEffect(() => {
-    if (!profile?.puuid || profile.careerSidebar) {
+    if (!profile?.puuid || profile.careerSidebar || !(profile.recentGames || []).length) {
       setCareerLoading(false);
       setCareerError(false);
       return undefined;
@@ -777,7 +815,7 @@ export default function Dashboard() {
     run().finally(() => { if (!cancelled) setCareerLoading(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.puuid, profile?.careerSidebar, activeId]);
+  }, [profile?.puuid, profile?.careerSidebar, profile?.recentGames?.length, activeId]);
 
   useEffect(() => {
     if (!profile?.riotId) return undefined;
@@ -796,9 +834,47 @@ export default function Dashboard() {
       });
     };
     tick();
+    // Don't poll spectator every 20s until match history has landed — it steals Riot quota.
+    if (!(profile.recentGames || []).length) {
+      return () => { cancelled = true; };
+    }
     const id = setInterval(tick, 20000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [profile?.riotId, profile?.platform, lookup.platform, lookup.region]);
+  }, [profile?.riotId, profile?.platform, profile?.recentGames?.length, lookup.platform, lookup.region]);
+
+  // Per-game LP is not on Riot match-v5 — fill from the local U.GG helper.
+  useEffect(() => {
+    const games = profile?.recentGames || [];
+    if (!profile?.riotId || !games.length) return undefined;
+    const queue = rankedQueue(mode);
+    if (!queue) return undefined;
+    const key = `${profile.riotId}|${mode}|${games.length}`;
+    if (lpTried.current === key) return undefined;
+    if (games.filter((g) => g.lpDelta != null).length >= Math.min(3, games.length)) {
+      lpTried.current = key;
+      return undefined;
+    }
+    const parsed = parseRiotIdInput(profile.riotId);
+    if (!parsed.gameName || !parsed.tagLine) return undefined;
+    let cancelled = false;
+    lpTried.current = key;
+    getMatchLp({
+      gameName: parsed.gameName,
+      tagLine: parsed.tagLine,
+      platform: profile.platform || lookup.platform,
+      queue,
+    }).then((res) => {
+      if (cancelled || !res?.lp) return;
+      setProfile((prev) => {
+        if (!prev?.recentGames) return prev;
+        return {
+          ...prev,
+          recentGames: applyTrackedLp(prev.recentGames, res.lp, prev.riotId, mode),
+        };
+      });
+    }).catch(() => { /* LP is optional */ });
+    return () => { cancelled = true; };
+  }, [profile?.riotId, profile?.recentGames?.length, profile?.platform, mode, lookup.platform]);
 
   // Pro identity badge — silent no-op for the vast majority of accounts.
   useEffect(() => {
@@ -1093,23 +1169,6 @@ export default function Dashboard() {
                   games={overview.games}
                 />
 
-                <LpChart
-                  history={profile.lpHistory}
-                  lpDelta30d={profile.solo?.lpDelta30d}
-                  estMmr={profile.solo?.estMmr ?? profile.estMmr}
-                />
-
-                <div className="wd-insight-row">
-                  <InsightsCard
-                    stats={profile.stats}
-                    overview={overview}
-                    lens={profile.lens}
-                    mainRole={mainRole}
-                    mode={mode}
-                  />
-                  <HourHeatmap games={allGames} />
-                </div>
-
                 <div className="wd-filters">
                   <div className="wd-role-filters">
                     {ROLE_FILTERS.map((r) => (
@@ -1167,7 +1226,9 @@ export default function Dashboard() {
                                 return {
                                   ...prev,
                                   recentGames: prev.recentGames.map((row) => (
-                                    row.matchId === next.matchId ? { ...row, ...next } : row
+                                    row.matchId === next.matchId
+                                      ? { ...row, ...next, lpDelta: next.lpDelta ?? row.lpDelta }
+                                      : row
                                   )),
                                 };
                               });
@@ -1178,7 +1239,19 @@ export default function Dashboard() {
                     );
                   })}
                   {!games.length ? (
-                    <div className="wd-empty-inline muted">No games for this queue / role filter.</div>
+                    <div className="wd-empty-inline muted">
+                      {(Number(profile.solo?.wins) || 0) + (Number(profile.flex?.wins) || 0) > 0 ? (
+                        <>
+                          Couldn’t load match history (Riot is busy).
+                          {' '}
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => load(activeId)}>
+                            Retry
+                          </button>
+                        </>
+                      ) : (
+                        'No games for this queue / role filter.'
+                      )}
+                    </div>
                   ) : null}
                 </div>
               </section>

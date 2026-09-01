@@ -1,16 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getLeaderboard, getTierList } from '../api';
+import { getDashboard, getLeaderboard, getTierList } from '../api';
 import { getAppUrl } from '../getAppUrl';
 import { useSession } from '../session';
 import {
   REGIONS,
   champIconUrl,
-  champSplashUrl,
   ddragonVersion,
   parseRiotIdInput,
   platformShort,
   profileIconUrl,
+  rankColor,
+  rankImg,
 } from '../lib';
 
 const LB_PLATFORMS = [
@@ -26,33 +27,7 @@ const MEEPS = [
   { src: './meep-curl.svg', className: 'meep meep-4' },
 ];
 
-const QUICK_LINKS = [
-  { to: '/tierlist', label: 'Tier list' },
-  { to: '/leaderboard?mode=soloq&tier=challenger', label: 'Challenger ladder' },
-  { to: '/tierlist/aram', label: 'ARAM' },
-  { to: '/scouting', label: 'Scouting' },
-];
-
-const EXPLORE = [
-  {
-    to: '/scouting',
-    eyebrow: 'Pre-game',
-    title: 'Scouting',
-    blurb: 'Read every lobby before it starts — ranks, champion pools, and recent form.',
-  },
-  {
-    to: '/data-studio',
-    eyebrow: 'Deep stats',
-    title: 'Data Studio',
-    blurb: 'Slice the meta by rank, region, and patch with charts you can actually read.',
-  },
-  {
-    to: '/esports',
-    eyebrow: 'Pro play',
-    title: 'Esports',
-    blurb: 'Follow pro games, rosters, and what the best players are picking right now.',
-  },
-];
+const RIOT_NOTE = 'Rift.lol is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games or anyone officially involved in producing or managing League of Legends.';
 
 function tierColor(tier) {
   const t = String(tier || '?');
@@ -91,11 +66,66 @@ function Meeps() {
   );
 }
 
+function SearchBar({ query, setQuery, searchPlatform, setSearchPlatform, onSearch }) {
+  return (
+    <form className="hero-search" onSubmit={onSearch}>
+      <label className="hero-region">
+        <select
+          value={searchPlatform}
+          onChange={(e) => setSearchPlatform(e.target.value)}
+          aria-label="Region"
+        >
+          {REGIONS.map((r) => (
+            <option key={r.platform} value={r.platform}>{r.short}</option>
+          ))}
+        </select>
+        <svg viewBox="0 0 12 12" aria-hidden="true">
+          <path fill="currentColor" d="M2.2 4.2 6 8l3.8-3.8L11 5.4 6 10.4 1 5.4z" />
+        </svg>
+      </label>
+      <div className="hero-search-field">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="currentColor" d="M10.5 3a7.5 7.5 0 0 1 5.9 12.1l4.2 4.2-1.4 1.4-4.2-4.2A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z" />
+        </svg>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Summoner Name#TAG"
+          autoComplete="off"
+          aria-label="Search summoner"
+        />
+      </div>
+      <button type="submit" className="hero-search-go">Search</button>
+    </form>
+  );
+}
+
+function GameSkeleton({ count = 5 }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="home-game is-skeleton" aria-hidden="true">
+          <span className="sk sk-avatar" />
+          <span className="home-champ">
+            <span className="sk sk-avatar" />
+            <span className="home-champ-text">
+              <span className="sk sk-line sk-line-name" />
+              <span className="sk sk-line sk-line-sub" />
+            </span>
+          </span>
+          <span className="sk sk-line sk-line-cell" />
+        </div>
+      ))}
+    </>
+  );
+}
+
 function SkeletonRows({ count = 5, variant = '' }) {
   return (
     <>
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className={`home-widget-row is-skeleton ${variant}`} aria-hidden="true">
+          {variant.includes('lb') ? <span className="sk sk-line sk-line-cell" /> : null}
           <span className="home-champ">
             <span className="sk sk-avatar" />
             <span className="home-champ-text">
@@ -105,7 +135,7 @@ function SkeletonRows({ count = 5, variant = '' }) {
           </span>
           <span className="sk sk-line sk-line-cell" />
           <span className="sk sk-line sk-line-cell" />
-          <span className="sk sk-line sk-line-cell" />
+          {variant.includes('lb') ? null : <span className="sk sk-line sk-line-cell" />}
         </div>
       ))}
     </>
@@ -123,6 +153,10 @@ export default function Home() {
   const [tierLoading, setTierLoading] = useState(true);
   const [lbLoading, setLbLoading] = useState(true);
   const [searchPlatform, setSearchPlatform] = useState(session?.platform || 'euw1');
+  const [you, setYou] = useState(null);
+  const [youLoading, setYouLoading] = useState(false);
+  const [youError, setYouError] = useState('');
+  const [youTick, setYouTick] = useState(0);
 
   const platform = session?.platform || 'euw1';
 
@@ -168,10 +202,48 @@ export default function Home() {
     return () => { alive = false; };
   }, [lbPlatform]);
 
+  useEffect(() => {
+    if (!session?.gameName || !session?.tagLine) {
+      setYou(null);
+      setYouError('');
+      setYouLoading(false);
+      return undefined;
+    }
+    let alive = true;
+    setYouLoading(true);
+    setYouError('');
+    getDashboard({
+      gameName: session.gameName,
+      tagLine: session.tagLine,
+      platform: session.platform || 'euw1',
+      region: session.region,
+      mode: 'Solo',
+      count: 20,
+    })
+      .then((payload) => { if (alive) setYou(payload); })
+      .catch((err) => {
+        if (!alive) return;
+        setYou(null);
+        setYouError(err.message || 'Could not load your games.');
+      })
+      .finally(() => { if (alive) setYouLoading(false); });
+    return () => { alive = false; };
+  }, [session?.gameName, session?.tagLine, session?.platform, session?.region, youTick]);
+
   const tierRows = useMemo(() => topTierRows(tierData, 5), [tierData]);
-  const popular = useMemo(() => topTierRows(tierData, 4), [tierData]);
   const lbRows = (lbData?.entries || []).slice(0, 5);
   const patch = tierData?.patch || '';
+  const overview = you?.overview || {};
+  const recent = (you?.recentGames || []).slice(0, 5);
+  const ranked = you?.solo || {
+    rank: you?.rank,
+    lp: you?.lp,
+    wins: you?.wins,
+    losses: you?.losses,
+  };
+  const emblem = rankImg(ranked?.rank || you?.rank);
+  const rankLabel = ranked?.rank || you?.rank || 'Unranked';
+  const dashVersion = you?.ddragonVersion || version;
 
   const onSearch = (e) => {
     e.preventDefault();
@@ -190,73 +262,107 @@ export default function Home() {
 
       <section className="hero">
         <div className="hero-glow" aria-hidden="true" />
-
-        <span className="hero-badge">
-          <i aria-hidden="true" />
-          {patch ? `Patch ${patch} · live data` : 'Live League data'}
-        </span>
-
-        <h1 className="hero-title">
-          Win more.
-          <span className="hero-title-accent">Think less.</span>
-        </h1>
-
-        <p className="hero-sub">
-          Tier lists, builds, ladders and pre-game scouting for League of Legends.
-          Search any Riot ID — no account needed.
-        </p>
-
-        <form className="hero-search" onSubmit={onSearch}>
-          <label className="hero-region">
-            <select
-              value={searchPlatform}
-              onChange={(e) => setSearchPlatform(e.target.value)}
-              aria-label="Region"
-            >
-              {REGIONS.map((r) => (
-                <option key={r.platform} value={r.platform}>{r.short}</option>
-              ))}
-            </select>
-            <svg viewBox="0 0 12 12" aria-hidden="true">
-              <path fill="currentColor" d="M2.2 4.2 6 8l3.8-3.8L11 5.4 6 10.4 1 5.4z" />
-            </svg>
-          </label>
-
-          <div className="hero-search-field">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path fill="currentColor" d="M10.5 3a7.5 7.5 0 0 1 5.9 12.1l4.2 4.2-1.4 1.4-4.2-4.2A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z" />
-            </svg>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Summoner Name#TAG"
-              autoComplete="off"
-              aria-label="Search summoner"
-            />
-          </div>
-
-          <button type="submit" className="hero-search-go">Search</button>
-        </form>
-
-        <div className="hero-quick">
-          <span className="hero-quick-label">Jump to</span>
-          {QUICK_LINKS.map((l) => (
-            <Link key={l.to} className="hero-chip" to={l.to}>{l.label}</Link>
-          ))}
-        </div>
-
+        <img className="hero-mark" src="./icon.png" alt="" />
+        <p className="hero-wordmark">RIFT.LOL</p>
+        <SearchBar
+          query={query}
+          setQuery={setQuery}
+          searchPlatform={searchPlatform}
+          setSearchPlatform={setSearchPlatform}
+          onSearch={onSearch}
+        />
         {session ? (
+          <div className="hero-you">
+            {emblem ? <img className="hero-you-rank" src={emblem} alt="" /> : null}
+            <img
+              src={profileIconUrl(you?.profileIconId || session.profileIconId || 29, dashVersion)}
+              alt=""
+              onError={(e) => { e.currentTarget.src = profileIconUrl(29, dashVersion); }}
+            />
+            <div className="hero-you-copy">
+              <strong>{session.gameName}#{session.tagLine}</strong>
+              <span>
+                <em style={{ color: rankColor(rankLabel) }}>{rankLabel}</em>
+                {ranked?.lp != null ? ` · ${ranked.lp} LP` : ''}
+                {overview.games ? ` · last ${overview.games}: ${overview.winrate}% WR` : ` · ${platformShort(session.platform)}`}
+              </span>
+            </div>
+            <Link className="hero-you-go" to="/dashboard">Dashboard</Link>
+          </div>
+        ) : (
           <p className="hero-session">
-            Linked as <Link to="/dashboard">{session.gameName}#{session.tagLine}</Link>
-            {' · '}defaults to {platformShort(session.platform)}
+            Search any Riot ID — no account needed.
           </p>
-        ) : null}
+        )}
+
+        <Link className="home-promo" to={getAppUrl()}>
+          <div className="home-promo-copy">
+            <em>Rift App · Windows</em>
+            <strong>Win more. Think less.</strong>
+            <p>Live overlay, lobby scouting, and clips — while you play.</p>
+          </div>
+          <span className="btn btn-gold">Get the app</span>
+        </Link>
       </section>
 
-      <section className="home-widgets">
-        <article className="home-widget">
+      <section className="home-widgets" aria-label="Home">
+        <article className="home-widget is-you">
+          {session ? (
+            <>
+              <Link className="home-widget-head" to="/dashboard">
+                <span>
+                  <em className="home-widget-kicker">You</em>
+                  Recent games
+                </span>
+                <span className="home-widget-head-right"><span aria-hidden="true">›</span></span>
+              </Link>
+              <div className="home-game home-game-cols muted">
+                <span>Result</span>
+                <span>Champion</span>
+                <span>KDA</span>
+              </div>
+              {youError ? (
+                <div className="home-you-error">
+                  <p>{youError}</p>
+                  <button type="button" className="hero-chip" onClick={() => setYouTick((n) => n + 1)}>Retry</button>
+                </div>
+              ) : null}
+              {youLoading && !you ? <GameSkeleton count={5} /> : null}
+              {!youLoading && !youError && !recent.length ? <div className="home-widget-empty">No recent Solo games.</div> : null}
+              {recent.map((g) => (
+                <Link key={g.matchId} className={`home-game ${g.win ? 'is-win' : 'is-loss'}`} to="/dashboard">
+                  <b>{g.win ? 'W' : 'L'}</b>
+                  <span className="home-champ">
+                    <img src={champIconUrl(g.champion, dashVersion)} alt="" />
+                    <span className="home-champ-text">
+                      <strong>{g.champion}</strong>
+                      <em>{g.role || '—'} · {g.ago}</em>
+                    </span>
+                  </span>
+                  <span className="mono">{g.kills}/{g.deaths}/{g.assists}</span>
+                </Link>
+              ))}
+              <Link className="home-widget-more" to="/scouting">Scout the next lobby</Link>
+            </>
+          ) : (
+            <div className="home-you-guest">
+              <em className="home-widget-kicker">You</em>
+              <strong>Your command center</strong>
+              <p>Link a Riot ID and this card becomes your games, rank, and next lobby — not another stats dump.</p>
+              <div className="home-you-guest-actions">
+                <Link className="btn btn-violet" to="/profile">Link profile</Link>
+                <Link className="hero-chip" to="/scouting">Scouting</Link>
+              </div>
+            </div>
+          )}
+        </article>
+
+        <article className="home-widget is-tier">
           <Link className="home-widget-head" to="/tierlist">
-            <span>Tier list &amp; builds</span>
+            <span>
+              <em className="home-widget-kicker">What to play</em>
+              Tier list
+            </span>
             <span className="home-widget-head-right">
               {patch ? <em className="home-widget-chip">{patch}</em> : null}
               <span aria-hidden="true">›</span>
@@ -284,12 +390,15 @@ export default function Home() {
               <span className="mono muted">{Number(row.pickrate).toFixed(1)}%</span>
             </Link>
           ))}
-          <Link className="home-widget-more" to="/tierlist">See full tier list</Link>
+          <Link className="home-widget-more" to="/tierlist">Full tier list</Link>
         </article>
 
-        <article className="home-widget">
+        <article className="home-widget is-ladder">
           <div className="home-widget-head is-static">
-            <Link to="/leaderboard">Challenger ladder</Link>
+            <Link to="/leaderboard?mode=soloq&tier=challenger">
+              <em className="home-widget-kicker">Who is climbing</em>
+              Leaderboards
+            </Link>
             <div className="home-lb-tabs">
               {LB_PLATFORMS.map((p) => (
                 <button
@@ -310,7 +419,7 @@ export default function Home() {
             <span>WR</span>
           </div>
           {lbLoading ? <SkeletonRows count={5} variant="home-widget-row-lb" /> : null}
-          {!lbLoading && !lbRows.length ? <div className="home-widget-empty">Ladder unavailable.</div> : null}
+          {!lbLoading && !lbRows.length ? <div className="home-widget-empty">Leaderboards unavailable.</div> : null}
           {!lbLoading && lbRows.map((row) => (
             <Link key={row.puuid || row.rank} className="home-widget-row home-widget-row-lb" to="/leaderboard">
               <span className="mono muted">{row.rank}</span>
@@ -330,64 +439,12 @@ export default function Home() {
             </Link>
           ))}
           <Link className="home-widget-more" to="/leaderboard">
-            {platformShort(lbPlatform)} full ladder
+            {platformShort(lbPlatform)} leaderboards
           </Link>
         </article>
       </section>
 
-      <section className="home-popular">
-        <header className="home-section-head">
-          <div>
-            <h2>Most popular champions</h2>
-            <p>Best builds, matchups, and meta picks on the live patch.</p>
-          </div>
-          <Link className="home-section-link" to="/tierlist">All champions ›</Link>
-        </header>
-        <div className="home-popular-grid">
-          {(popular.length ? popular : [
-            { champion: 'Kai\'Sa', role: 'ADC' },
-            { champion: 'Caitlyn', role: 'ADC' },
-            { champion: 'Jhin', role: 'ADC' },
-            { champion: 'Ahri', role: 'Mid' },
-          ]).map((row) => (
-            <Link
-              key={row.champion}
-              className="popular-card"
-              to={`/tierlist/${encodeURIComponent(row.champion)}?role=${encodeURIComponent(row.role || 'Mid')}&rank=master&platform=${encodeURIComponent(platform)}`}
-            >
-              <img className="popular-card-art" src={champSplashUrl(row.champion)} alt="" loading="lazy" />
-              <div className="popular-card-fade" />
-              <div className="popular-card-copy">
-                <em className="popular-card-role">{row.role || 'Mid'}</em>
-                <strong>{row.champion}</strong>
-                <span>Builds, runes &amp; counters ›</span>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <section className="home-explore">
-        <div className="home-explore-grid">
-          {EXPLORE.map((card) => (
-            <Link key={card.to} className="explore-card" to={card.to}>
-              <em>{card.eyebrow}</em>
-              <strong>{card.title}</strong>
-              <p>{card.blurb}</p>
-              <span className="explore-card-go" aria-hidden="true">›</span>
-            </Link>
-          ))}
-        </div>
-
-        <Link className="home-app-cta" to={getAppUrl()}>
-          <div className="home-app-cta-copy">
-            <em>Rift App · Windows</em>
-            <strong>Get the desktop app</strong>
-            <p>Live overlays, match scouting, replay clips, and TFT comps while you play.</p>
-          </div>
-          <span className="btn btn-gold">Download free</span>
-        </Link>
-      </section>
+      <p className="home-riot is-end">{RIOT_NOTE}</p>
     </div>
   );
 }

@@ -663,7 +663,7 @@
 .wd-match-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 92px 150px 110px 1fr 70px 48px;
+  grid-template-columns: 104px 150px 110px 1fr 70px 48px;
   gap: 12px;
   align-items: center;
   padding: 10px 12px;
@@ -681,11 +681,20 @@
   gap: 2px;
   font-size: 11px;
   color: var(--muted);
+  min-width: 0;
 }
 
-.wd-match-result { font-weight: 800; letter-spacing: 0.02em; }
+.wd-match-result { font-weight: 800; letter-spacing: 0.02em; font-size: 13px; line-height: 1.2; }
 .wd-match-result.win { color: #7eb6ff; }
 .wd-match-result.loss { color: #ff5c68; }
+.wd-match-lp {
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+.wd-match-lp.is-up { color: #3ecf8e; }
+.wd-match-lp.is-down { color: #ff8f9a; }
 
 .wd-match-champ {
   display: grid;
@@ -852,6 +861,9 @@
   text-align: center;
   border: 1px dashed var(--line);
   border-radius: 12px;
+}
+.wd-empty-inline .btn {
+  margin-left: 8px;
 }
 
 .wd-champ-table { padding: 16px; }
@@ -1086,6 +1098,10 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.wd-expand-body {
+  padding: 16px 12px 14px;
+}
+
 .wd-expand-tabs button {
   border: 0;
   background: transparent;
@@ -1114,10 +1130,30 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 8px;
+  margin: 2px 0 10px;
+}
+.wd-sb-team-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
 }
 .wd-sb-team-head .win { color: #7eb6ff; }
 .wd-sb-team-head .loss { color: #ff5c68; }
+.wd-sb-team-head strong {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1.25;
+}
+.wd-sb-lp {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.wd-sb-lp.is-up { color: #3ecf8e; }
+.wd-sb-lp.is-down { color: #ff8f9a; }
 .wd-sb-obj {
   display: flex;
   flex-wrap: wrap;
@@ -1128,7 +1164,7 @@
 
 .wd-sb-row {
   display: grid;
-  grid-template-columns: 44px 150px 52px minmax(120px, 1fr) 110px minmax(100px, 1.1fr) 44px;
+  grid-template-columns: 44px minmax(0, 1.4fr) 52px minmax(100px, 1fr) 110px minmax(90px, 1fr) 44px;
   gap: 8px;
   align-items: center;
   padding: 7px 8px;
@@ -1171,6 +1207,12 @@
   border-radius: 4px;
   padding: 0 3px;
 }
+.wd-sb-id .wd-champ { flex: 0 0 auto; }
+.wd-sb-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
 .wd-sb-id strong {
   display: block;
   font-size: 12px;
@@ -1178,7 +1220,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.wd-sb-id span { font-size: 10px; color: var(--muted); }
+.wd-sb-id span {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .wd-sb-icons {
   display: flex;

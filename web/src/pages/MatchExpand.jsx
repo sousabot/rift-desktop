@@ -9,6 +9,7 @@ import {
   spellIconUrl,
   summonerIconUrl,
 } from '../lib';
+import { formatLpDelta } from '../lib/lpHistory';
 
 function fmtSigned(v) {
   if (v == null || Number.isNaN(Number(v))) return '—';
@@ -62,7 +63,7 @@ function PlayerRow({ p, version, runeIndex, maxDamage }) {
       <div className="wd-sb-id">
         <ChampImg name={p.champion} size={36} version={version} />
         {p.champLevel ? <em>{p.champLevel}</em> : null}
-        <div>
+        <div className="wd-sb-name" title={p.riotId || p.gameName || p.champion}>
           <strong>{p.gameName || p.champion}</strong>
           <span>{p.role || '—'}</span>
         </div>
@@ -96,11 +97,17 @@ function PlayerRow({ p, version, runeIndex, maxDamage }) {
   );
 }
 
-function TeamBlock({ label, win, players, obj, version, runeIndex, maxDamage }) {
+function TeamBlock({ label, win, players, obj, version, runeIndex, maxDamage, lpDelta, lpDeltaEst }) {
+  const lpLabel = formatLpDelta(lpDelta, lpDeltaEst);
   return (
     <div className={`wd-sb-team ${win ? 'is-win' : 'is-loss'}`}>
       <div className="wd-sb-team-head">
-        <strong className={win ? 'win' : 'loss'}>{label}</strong>
+        <div className="wd-sb-team-title">
+          <strong className={win ? 'win' : 'loss'}>{label}</strong>
+          {lpLabel ? (
+            <em className={`wd-sb-lp ${Number(lpDelta) > 0 ? 'is-up' : 'is-down'}`}>{lpLabel}</em>
+          ) : null}
+        </div>
         <div className="wd-sb-obj">
           <span title="Towers">Towers {obj?.tower ?? 0}</span>
           <span title="Dragons">Dragons {obj?.dragon ?? 0}</span>
@@ -131,8 +138,8 @@ function GeneralTab({ game, version, runeIndex }) {
   // Show self's team first
   const selfOnBlue = blue.some((p) => p.isSelf);
   const first = selfOnBlue
-    ? { label: selfTeamWin ? 'Victory' : 'Defeat', win: selfTeamWin, players: blue, obj: board.blueObj }
-    : { label: selfTeamWin ? 'Victory' : 'Defeat', win: selfTeamWin, players: red, obj: board.redObj };
+    ? { label: selfTeamWin ? 'Victory' : 'Defeat', win: selfTeamWin, players: blue, obj: board.blueObj, lpDelta: game.lpDelta, lpDeltaEst: game.lpDeltaEst }
+    : { label: selfTeamWin ? 'Victory' : 'Defeat', win: selfTeamWin, players: red, obj: board.redObj, lpDelta: game.lpDelta, lpDeltaEst: game.lpDeltaEst };
   const second = selfOnBlue
     ? { label: selfTeamWin ? 'Defeat' : 'Victory', win: !selfTeamWin, players: red, obj: board.redObj }
     : { label: selfTeamWin ? 'Defeat' : 'Victory', win: !selfTeamWin, players: blue, obj: board.blueObj };

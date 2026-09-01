@@ -951,13 +951,18 @@ async function fetchRecentMatchIds(riotFetch, matchRegion, puuid, count, queue) 
     try {
       const filtered = await riotFetchRetry(riotFetch, listUrl(count, queue));
       if (Array.isArray(filtered) && filtered.length) return filtered;
-    } catch { /* fall through to unfiltered window */ }
+    } catch (err) {
+      const status = Number(err?.status) || 0;
+      if (status === 429 || status === 503) throw err;
+    }
   }
   try {
     const take = queue != null ? Math.min(100, Math.max(count * 5, count)) : count;
     const all = await riotFetchRetry(riotFetch, listUrl(take, null));
     return Array.isArray(all) ? all : [];
-  } catch {
+  } catch (err) {
+    const status = Number(err?.status) || 0;
+    if (status === 429 || status === 503) throw err;
     return [];
   }
 }
@@ -981,27 +986,43 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
   let matchIds = [];
   try {
     matchIds = await fetchRecentMatchIds(riotFetch, matchRegion, account.puuid, matchCount, q);
-  } catch {
+  } catch (err) {
+    const status = Number(err?.status) || 0;
+    if (status === 429 || status === 503) throw err;
     matchIds = [];
   }
   if (!Array.isArray(matchIds)) matchIds = [];
 
+  let rateLimited = false;
   const matches = await mapWithConcurrency(matchIds, MATCH_CONCURRENCY, async (id) => {
+    if (rateLimited) return null;
     try {
       return await riotFetch(`https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${id}`);
-    } catch {
+    } catch (err) {
+      if (Number(err?.status) === 429 || Number(err?.status) === 503) rateLimited = true;
       return null;
     }
   });
 
-  // Timelines after matches, lower concurrency + retry — needed for build/skill/@15.
-  const timelines = await mapWithConcurrency(matchIds, TIMELINE_CONCURRENCY, (id) => (
-    fetchTimeline(riotFetch, matchRegion, id)
-  ));
+  const loadedMatches = (matches || []).filter((m) => m?.info).length;
+  if (matchIds.length && !loadedMatches && rateLimited) {
+    const err = new Error('Riot API 429: rate limit exceeded');
+    err.status = 429;
+    throw err;
+  }
+
+  // Timelines are extra Riot calls — skip when already limited so the match list can still land.
+  const timelines = rateLimited
+    ? matchIds.map(() => null)
+    : await mapWithConcurrency(matchIds, TIMELINE_CONCURRENCY, (id) => (
+      fetchTimeline(riotFetch, matchRegion, id)
+    ));
 
   const [masteries, meta] = await Promise.all([
-    riotFetch(`https://${shard}.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-puuid/${account.puuid}`)
-      .catch(() => []),
+    rateLimited
+      ? Promise.resolve([])
+      : riotFetch(`https://${shard}.api.riotgames.com/lol/champion-mastery/v4/champion-masteries/by-puuid/${account.puuid}`)
+        .catch(() => []),
     getChampionMeta(),
   ]);
 
@@ -1038,7 +1059,7 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
   );
 
   const puuid = account.puuid;
-  const recentGames = (matches || []).map((m, idx) => {
+  let recentGames = (matches || []).map((m, idx) => {
     if (!m?.info) return null;
     if (q != null && Number(m.info.queueId) !== Number(q)) return null;
     const p = m.info.participants?.find((pp) => pp.puuid === puuid);
@@ -1141,6 +1162,19 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
       scoreboard,
     };
   }).filter(Boolean).slice(0, matchCount);
+
+  const rankedQueue = (q === 420 || q === 440) ? q : null;
+  if (rankedQueue && recentGames.length) {
+    try {
+      const { fetchMatchLp, applyLpDeltas } = require('./ugg-lp');
+      const lpMap = await fetchMatchLp({
+        riotId: `${account.gameName}#${account.tagLine}`,
+        platform: shard,
+        queue: rankedQueue,
+      });
+      recentGames = applyLpDeltas(recentGames, lpMap);
+    } catch { /* LP is optional */ }
+  }
 
   const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
   const kdaVal = avg(recentGames.map((g) => (g.kills + g.assists) / Math.max(1, g.deaths)));

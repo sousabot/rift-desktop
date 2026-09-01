@@ -202,7 +202,8 @@ function Shell() {
   const esportsActive = location.pathname.startsWith('/esports');
   const scoutingActive = location.pathname.startsWith('/scouting');
   const getAppActive = location.pathname.startsWith('/get-app');
-  const wideMain = dashActive || studioActive || esportsActive || scoutingActive || getAppActive;
+  const homeActive = location.pathname === '/' || location.pathname === '';
+  const wideMain = homeActive || dashActive || studioActive || esportsActive || scoutingActive || getAppActive;
 
   return (
     <div className="site-shell">
@@ -346,7 +347,10 @@ function Shell() {
         </div>
         <div className="foot-bottom">
           <span>© {new Date().getFullYear()} Rift.lol</span>
-          <span className="muted">Not endorsed by Riot Games</span>
+          <span className="foot-riot">
+            Rift.lol is not endorsed by Riot Games and does not reflect the views or opinions of Riot Games
+            or anyone officially involved in producing or managing League of Legends.
+          </span>
         </div>
       </footer>
       ) : null}

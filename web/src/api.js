@@ -13,6 +13,7 @@ const LOCAL_PREFERRED = [
   '/v1/web/otps',
   '/v1/web/scouting',
   '/v1/web/premium',
+  '/v1/web/match-lp',
 ];
 
 /** Riot-backed web routes — fall back to Render if the local key is expired. */
@@ -85,6 +86,37 @@ function isExpiredKey(err) {
   return /invalid or expired|unknown apikey|unauthorized/i.test(String(err.message || ''));
 }
 
+function isRateLimited(err) {
+  if (!err) return false;
+  if (err.status === 429) return true;
+  return /rate limit/i.test(String(err.message || ''));
+}
+
+function isLocalUnreachable(err) {
+  return /failed to fetch|networkerror|load failed|econnrefused/i.test(String(err?.message || err || ''));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Once the local Riot key is dead, keep using Render for this page session. */
+let localRiotDead = false;
+
+async function fetchApiRetry(base, path, { timeoutMs = 45000, retries = 3 } = {}) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    try {
+      return await fetchApi(base, path, { timeoutMs });
+    } catch (err) {
+      lastErr = err;
+      if (!isRateLimited(err) || attempt === retries - 1) throw err;
+      await sleep(2000 * (attempt + 1));
+    }
+  }
+  throw lastErr;
+}
+
 function flexNotReadyError() {
   const err = new Error('Flex isn’t on the hosted ladder yet. SoloQ still loads.');
   err.status = 501;
@@ -106,22 +138,22 @@ function assertFlexPayload(path, body) {
 
 async function getJson(path, { timeoutMs = 45000 } = {}) {
   const primary = apiBase();
+  const canUseRender = import.meta.env.DEV
+    && primary === LOCAL_API
+    && isRiotBacked(path)
+    && !prefersLocal(path);
+
+  if (canUseRender && localRiotDead) {
+    return fetchApiRetry(DEFAULT_API, path, { timeoutMs });
+  }
+
   try {
     return await fetchApi(primary, path, { timeoutMs });
   } catch (err) {
-    // Dev convenience: expired local RIOT_API_KEY → use hosted Riot proxy for ladder/dashboard.
-    const canFallback = import.meta.env.DEV
-      && primary === LOCAL_API
-      && isExpiredKey(err)
-      && isRiotBacked(path)
-      && !prefersLocal(path);
-    if (!canFallback) throw err;
-    try {
-      const body = await fetchApi(DEFAULT_API, path, { timeoutMs });
-      return body;
-    } catch {
-      throw err;
-    }
+    // Dev: expired / rate-limited local key → hosted Riot proxy.
+    if (!canUseRender || !(isExpiredKey(err) || isRateLimited(err) || isLocalUnreachable(err))) throw err;
+    if (isExpiredKey(err) || isLocalUnreachable(err)) localRiotDead = true;
+    return fetchApiRetry(DEFAULT_API, path, { timeoutMs });
   }
 }
 
@@ -195,6 +227,16 @@ export function getLiveGame({ gameName, tagLine, platform = 'euw1', region } = {
   const q = new URLSearchParams({ gameName, tagLine, platform });
   if (region) q.set('region', region);
   return getJson(`/v1/web/live?${q.toString()}`, { timeoutMs: 30000 });
+}
+
+export function getMatchLp({ gameName, tagLine, platform = 'euw1', queue = 420 } = {}) {
+  const q = new URLSearchParams({
+    gameName,
+    tagLine,
+    platform,
+    queue: String(queue === 440 ? 440 : 420),
+  });
+  return getJson(`/v1/web/match-lp?${q.toString()}`, { timeoutMs: 45000 });
 }
 
 export function getMatchTimeline({ matchId, region = 'europe', puuid } = {}) {
