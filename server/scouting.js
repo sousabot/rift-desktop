@@ -300,6 +300,7 @@ function buildScouting({
   plat,
   roleLane,
   lpFloor,
+  lpCeil,
   sortKey,
   descending,
   query,
@@ -311,8 +312,14 @@ function buildScouting({
   const effectiveSort = slim && !['lp', 'games', 'winrate'].includes(sortKey) ? 'lp' : sortKey;
   let laneIgnored = false;
 
-  if (lpFloor > 0) {
-    rows = rows.filter((p) => (Number(p.leaguePoints) || 0) >= lpFloor);
+  // Name search should still find Master+ players outside the browse LP band.
+  if (!query && (lpFloor > 0 || lpCeil != null)) {
+    rows = rows.filter((p) => {
+      const lp = Number(p.leaguePoints) || 0;
+      if (lpFloor > 0 && lp < lpFloor) return false;
+      if (lpCeil != null && lp > lpCeil) return false;
+      return true;
+    });
   }
   if (roleLane) {
     if (slim) laneIgnored = true;
@@ -344,6 +351,7 @@ function buildScouting({
     platform: plat,
     lane: roleLane || 'all',
     minLp: lpFloor,
+    maxLp: lpCeil,
     sort: effectiveSort,
     dir: descending ? 'desc' : 'asc',
     total: raw.list.length,
@@ -358,6 +366,7 @@ async function getScouting({
   platform = 'euw1',
   lane = 'all',
   minLp = 500,
+  maxLp = null,
   sort = 'kda',
   dir = 'desc',
   q = '',
@@ -367,6 +376,10 @@ async function getScouting({
   const plat = normalizePlatform(platform);
   const roleLane = normalizeLane(lane);
   const lpFloor = Math.max(0, Math.min(5000, Number(minLp) || 0));
+  const ceilRaw = maxLp == null || maxLp === '' ? null : Number(maxLp);
+  const lpCeil = Number.isFinite(ceilRaw) && ceilRaw > 0
+    ? Math.min(5000, ceilRaw)
+    : null;
   const sortKey = SORT_KEYS.has(String(sort || '').trim()) ? String(sort).trim() : 'kda';
   const descending = String(dir || 'desc').toLowerCase() !== 'asc';
   const query = String(q || '').trim().toLowerCase();
@@ -376,7 +389,7 @@ async function getScouting({
   try {
     const raw = await loadRaw(plat);
     return buildScouting({
-      raw, names, plat, roleLane, lpFloor, sortKey, descending, query, max, source: 'dpm',
+      raw, names, plat, roleLane, lpFloor, lpCeil, sortKey, descending, query, max, source: 'dpm',
     });
   } catch (dpmErr) {
     if (typeof riotFetch === 'function') {
@@ -388,6 +401,7 @@ async function getScouting({
           plat,
           roleLane,
           lpFloor,
+          lpCeil,
           sortKey,
           descending,
           query,

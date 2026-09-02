@@ -347,6 +347,7 @@ export function getScouting({
   platform = 'euw1',
   lane = 'all',
   minLp = 500,
+  maxLp = null,
   sort = 'kda',
   dir = 'desc',
   q = '',
@@ -360,6 +361,7 @@ export function getScouting({
     dir,
     limit: String(limit),
   });
+  if (maxLp != null && maxLp !== '') params.set('maxLp', String(maxLp));
   if (q) params.set('q', q);
   return getJson(`/v1/web/scouting?${params.toString()}`, { timeoutMs: 120000 });
 }

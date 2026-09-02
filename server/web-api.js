@@ -505,11 +505,13 @@ function registerWebApi(router) {
     const platform = clip(url.searchParams.get('platform') || 'euw1', 12) || 'euw1';
     const lane = clip(url.searchParams.get('lane') || 'all', 16) || 'all';
     const minLp = Number(url.searchParams.get('minLp') || url.searchParams.get('lp') || 500);
+    const maxRaw = url.searchParams.get('maxLp');
+    const maxLp = maxRaw == null || maxRaw === '' ? null : Number(maxRaw);
     const sort = clip(url.searchParams.get('sort') || 'kda', 32) || 'kda';
     const dir = clip(url.searchParams.get('dir') || 'desc', 8) || 'desc';
     const q = clip(url.searchParams.get('q') || '', 64);
     const limit = Number(url.searchParams.get('limit') || 250) || 250;
-    return getScouting({ platform, lane, minLp, sort, dir, q, limit, riotFetch });
+    return getScouting({ platform, lane, minLp, maxLp, sort, dir, q, limit, riotFetch });
   });
 
   const premium = require('./premium');

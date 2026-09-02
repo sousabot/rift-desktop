@@ -23,7 +23,27 @@ const LANES = [
   { id: 'utility', label: 'Support', role: 'Support' },
 ];
 
-const LP_STEPS = [0, 100, 200, 300, 500, 800, 1000, 1500];
+const LP_STEPS = [300, 500, 800, 1000, 1500, 0];
+
+function snapLpStep(value) {
+  const n = Number(value) || 0;
+  if (n <= 0) return 0;
+  if (n < 300) return 300;
+  let best = 300;
+  let dist = Infinity;
+  LP_STEPS.forEach((step) => {
+    if (!step) return;
+    const d = Math.abs(step - n);
+    if (d < dist) { dist = d; best = step; }
+  });
+  return best;
+}
+
+function lpCap(step) {
+  const snapped = snapLpStep(step);
+  if (!snapped) return { min: 0, max: null, label: 'All LP' };
+  return { min: 0, max: snapped, label: `Max ${snapped.toLocaleString()} LP` };
+}
 
 const LANE_ROLE = {
   TOP: 'Top',
@@ -195,7 +215,9 @@ export default function Scouting() {
     searchParams.get('platform') || session?.platform || 'euw1',
   );
   const [lane, setLane] = useState(searchParams.get('lane') || 'all');
-  const [minLp, setMinLp] = useState(Number(searchParams.get('lp')) || 500);
+  const [minLp, setMinLp] = useState(
+    searchParams.has('lp') ? snapLpStep(searchParams.get('lp')) : 0,
+  );
   const [sort, setSort] = useState(searchParams.get('sort') || 'kda');
   const [dir, setDir] = useState(searchParams.get('dir') || 'desc');
   const [query, setQuery] = useState(searchParams.get('q') || '');
@@ -222,7 +244,7 @@ export default function Scouting() {
     const next = new URLSearchParams();
     next.set('platform', platform);
     if (lane !== 'all') next.set('lane', lane);
-    if (minLp !== 500) next.set('lp', String(minLp));
+    if (minLp) next.set('lp', String(minLp));
     if (sort !== 'kda') next.set('sort', sort);
     if (dir !== 'desc') next.set('dir', dir);
     if (query) next.set('q', query);
@@ -233,7 +255,17 @@ export default function Scouting() {
     let alive = true;
     setLoading(true);
     setError('');
-    getScouting({ platform, lane, minLp, sort, dir, q: query, limit: 250 })
+    const cap = query ? { min: 0, max: null } : lpCap(minLp);
+    getScouting({
+      platform,
+      lane,
+      minLp: cap.min,
+      maxLp: cap.max,
+      sort,
+      dir,
+      q: query,
+      limit: 250,
+    })
       .then((payload) => {
         if (!alive) return;
         setData(payload);
@@ -252,15 +284,8 @@ export default function Scouting() {
   const hasRows = entries.length > 0;
   const slim = data?.source === 'riot';
   const reloading = loading && hasRows;
-  const nearestLp = useMemo(() => {
-    let best = LP_STEPS[0];
-    let dist = Infinity;
-    LP_STEPS.forEach((step) => {
-      const d = Math.abs(step - minLp);
-      if (d < dist) { dist = d; best = step; }
-    });
-    return best;
-  }, [minLp]);
+  const nearestLp = useMemo(() => snapLpStep(minLp), [minLp]);
+  const band = useMemo(() => lpCap(nearestLp), [nearestLp]);
 
   const maxLp = useMemo(
     () => Math.max(1, ...entries.map((row) => Number(row.lp) || 0)),
@@ -340,7 +365,7 @@ export default function Scouting() {
         </select>
 
         <label className="sc-lp">
-          <span>Min {nearestLp.toLocaleString()} LP</span>
+          <span>{band.label}</span>
           <input
             type="range"
             min={0}
@@ -348,7 +373,7 @@ export default function Scouting() {
             step={1}
             value={Math.max(0, LP_STEPS.indexOf(nearestLp))}
             onChange={(e) => setMinLp(LP_STEPS[Number(e.target.value)] || 0)}
-            aria-label="Minimum LP"
+            aria-label="Maximum LP"
           />
         </label>
 
@@ -365,7 +390,7 @@ export default function Scouting() {
       <p className="sc-context">
         {region}
         {' · '}
-        {nearestLp > 0 ? `${nearestLp.toLocaleString()} LP+` : 'All LP'}
+        {query ? 'Name search · all Master+' : band.label}
         {slim ? null : ` · ${laneLabel}`}
         {' · '}
         Sorted by {sortLabel}
