@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import RoleIcon from '../components/RoleIcon';
 import { countryName, flagUrl } from '../countryFlag';
 import { profileIconUrl, rankColor, rankImg, ddragonVersion } from '../lib';
-import { listPros, getProPlayer } from '../api';
+import { peekPros, hydrateProsFromSnapshot, refreshPros, getProPlayer } from '../api';
 import { t } from '../esportsStrings';
 import './Esports.css';
 
@@ -335,8 +335,22 @@ function readSavedCountry() {
 export default function Esports() {
   const locale = 'en';
   const [params, setParams] = useSearchParams();
-  const [payload, setPayload] = useState({ players: [], countries: [], leagues: [], status: 'idle' });
-  const [country, setCountry] = useState(readSavedCountry);
+  const savedCountry = readSavedCountry();
+  const [payload, setPayload] = useState(() => {
+    const hit = peekPros({ country: savedCountry, lane: '', league: '', query: '' });
+    if (hit) {
+      return {
+        players: hit.players || [],
+        countries: hit.countries || [],
+        leagues: hit.leagues || [],
+        truncated: Boolean(hit.truncated),
+        status: 'ready',
+        error: '',
+      };
+    }
+    return { players: [], countries: [], leagues: [], status: 'idle' };
+  });
+  const [country, setCountry] = useState(savedCountry);
   const [lane, setLane] = useState('');
   const [league, setLeague] = useState('');
   const [query, setQuery] = useState('');
@@ -358,32 +372,54 @@ export default function Esports() {
 
   useEffect(() => {
     let alive = true;
-    setPayload((prev) => ({ ...prev, players: [], status: 'loading' }));
-    listPros({
+    const args = {
       country,
       lane,
       league,
       query: debounced.length >= 3 ? debounced : '',
-    }).then((res) => {
+    };
+    (async () => {
+      let cached = peekPros(args);
+      if (!cached && !args.country && !args.lane && !args.league && !args.query) {
+        cached = await hydrateProsFromSnapshot(args);
+      }
       if (!alive) return;
-      setPayload((prev) => ({
-        players: res?.players || [],
-        countries: res?.countries?.length ? res.countries : prev.countries,
-        leagues: res?.leagues?.length ? res.leagues : prev.leagues,
-        truncated: Boolean(res?.truncated),
-        status: res?.ok ? 'ready' : 'error',
-        error: res?.error || '',
-      }));
-    }).catch((err) => {
-      if (alive) {
+      if (cached) {
+        setPayload({
+          players: cached.players || [],
+          countries: cached.countries || [],
+          leagues: cached.leagues || [],
+          truncated: Boolean(cached.truncated),
+          status: 'ready',
+          error: '',
+        });
+      } else {
         setPayload((prev) => ({
           ...prev,
-          players: [],
-          status: 'error',
+          status: 'loading',
+          error: '',
+        }));
+      }
+      try {
+        const res = await refreshPros(args);
+        if (!alive) return;
+        setPayload((prev) => ({
+          players: res?.players || [],
+          countries: res?.countries?.length ? res.countries : prev.countries,
+          leagues: res?.leagues?.length ? res.leagues : prev.leagues,
+          truncated: Boolean(res?.truncated),
+          status: res?.ok === false ? 'error' : 'ready',
+          error: res?.error || '',
+        }));
+      } catch (err) {
+        if (!alive) return;
+        setPayload((prev) => ({
+          ...prev,
+          status: prev.players?.length ? 'ready' : 'error',
           error: err.message,
         }));
       }
-    });
+    })();
     return () => { alive = false; };
   }, [country, lane, league, debounced]);
 
@@ -512,7 +548,7 @@ export default function Esports() {
               <p className="pr-muted pr-trim">{t('pros.topOnly')}</p>
             ) : null}
 
-            {payload.status === 'loading' ? (
+            {payload.status === 'loading' && !rows.length ? (
               <p className="pr-empty">{t('pros.loading')}</p>
             ) : !rows.length ? (
               <p className="pr-empty">{t('pros.empty')}</p>

@@ -237,7 +237,8 @@ const server = http.createServer(async (req, res) => {
       const data = await webHandler(req, url, serverRiotFetch);
       const extra = (url.pathname === '/v1/web/tierlist'
         || url.pathname === '/v1/web/champion'
-        || url.pathname === '/v1/web/leaderboard')
+        || url.pathname === '/v1/web/leaderboard'
+        || url.pathname === '/v1/web/pros')
         ? { 'Cache-Control': 'public, max-age=120, stale-while-revalidate=86400' }
         : (url.pathname === '/v1/web/dashboard'
           ? { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' }

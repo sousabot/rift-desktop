@@ -660,14 +660,122 @@ export function getStudioMeta({
   return getJson(`/v1/web/studio?${q.toString()}`, { timeoutMs: 90000 });
 }
 
-export function listPros({ country = '', lane = '', league = '', query = '' } = {}) {
+const PROS_MEM = new Map();
+const PROS_INFLIGHT = new Map();
+const PROS_LS_KEYS = 'rift.pros.v1.keys';
+const PROS_LS_MAX = 8;
+const PROS_SNAPSHOT_KEY = '|||';
+let prosSnapshotJob = null;
+
+function prosCacheKey({ country = '', lane = '', league = '', query = '' } = {}) {
+  return [
+    String(country || '').trim().toUpperCase(),
+    String(lane || '').trim(),
+    String(league || '').trim(),
+    String(query || '').trim().toLowerCase(),
+  ].join('|');
+}
+
+function rememberPros(args, data) {
+  if (!data || (!Array.isArray(data.players) && !Array.isArray(data.countries))) return data;
+  if (!(data.players?.length || data.countries?.length || data.leagues?.length)) return data;
+  const stored = { ...data, _cachedAt: Date.now() };
+  const k = prosCacheKey(args);
+  PROS_MEM.set(k, stored);
+  try {
+    localStorage.setItem(`rift.pros.v1:${k}`, JSON.stringify(stored));
+    const keys = JSON.parse(localStorage.getItem(PROS_LS_KEYS) || '[]').filter((x) => x !== k);
+    keys.unshift(k);
+    while (keys.length > PROS_LS_MAX) {
+      const drop = keys.pop();
+      try { localStorage.removeItem(`rift.pros.v1:${drop}`); } catch { /* ignore */ }
+    }
+    localStorage.setItem(PROS_LS_KEYS, JSON.stringify(keys));
+  } catch { /* quota / private mode */ }
+  return stored;
+}
+
+export function peekPros(args = {}) {
+  const k = prosCacheKey(args);
+  if (PROS_MEM.has(k)) return PROS_MEM.get(k);
+  try {
+    const raw = localStorage.getItem(`rift.pros.v1:${k}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.players) && !Array.isArray(parsed?.countries)) return null;
+    if (Date.now() - (Number(parsed._cachedAt) || 0) > 24 * 60 * 60 * 1000) return null;
+    PROS_MEM.set(k, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function hydrateProsFromSnapshot(args = {}) {
+  const k = prosCacheKey(args);
+  const hit = peekPros(args);
+  if (hit) return Promise.resolve(hit);
+  if (k !== PROS_SNAPSHOT_KEY) return Promise.resolve(null);
+  if (prosSnapshotJob) return prosSnapshotJob;
+  const base = String(import.meta.env.BASE_URL || './').replace(/\/?$/, '/');
+  prosSnapshotJob = fetch(`${base}meta/esports-ladder.json`, { cache: 'force-cache' })
+    .then((res) => {
+      if (!res.ok) throw new Error(`snapshot ${res.status}`);
+      return res.json();
+    })
+    .then((data) => {
+      if (!Array.isArray(data?.players) || !data.players.length) return null;
+      return rememberPros({}, {
+        ...data,
+        ok: true,
+        source: data.source || 'snapshot',
+        stale: true,
+      });
+    })
+    .catch(() => null);
+  return prosSnapshotJob;
+}
+
+export function listPros({
+  country = '',
+  lane = '',
+  league = '',
+  query = '',
+  force = false,
+} = {}) {
+  const args = { country, lane, league, query };
+  const k = prosCacheKey(args);
+  const cached = !force ? peekPros(args) : null;
+  if (!force && PROS_INFLIGHT.has(k)) {
+    return cached ? Promise.resolve(cached) : PROS_INFLIGHT.get(k);
+  }
   const q = new URLSearchParams();
   if (country) q.set('country', country);
   if (lane) q.set('lane', lane);
   if (league) q.set('league', league);
   if (query) q.set('query', query);
   const qs = q.toString();
-  return getJson(`/v1/web/pros${qs ? `?${qs}` : ''}`, { timeoutMs: 90000 });
+  const job = getJson(`/v1/web/pros${qs ? `?${qs}` : ''}`, { timeoutMs: 90000 })
+    .then((data) => rememberPros(args, data))
+    .finally(() => PROS_INFLIGHT.delete(k));
+  PROS_INFLIGHT.set(k, job);
+  if (cached) return Promise.resolve(cached);
+  return job;
+}
+
+export function refreshPros(args = {}) {
+  return listPros({ ...args, force: true });
+}
+
+export function prefetchPros(args = {}) {
+  const hit = peekPros(args);
+  const age = Date.now() - (Number(hit?._cachedAt) || 0);
+  if (hit && age < 10 * 60 * 1000) return Promise.resolve(hit);
+  if (hit) {
+    refreshPros(args).catch(() => {});
+    return Promise.resolve(hit);
+  }
+  return refreshPros(args).catch(() => null);
 }
 
 export function getProPlayer(slug) {

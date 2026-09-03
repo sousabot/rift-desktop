@@ -11,6 +11,7 @@
     <link rel="dns-prefetch" href="https://gd-desktop.onrender.com" />
     <link rel="preload" href="./meta/tierlist-euw1-master.json" as="fetch" crossorigin />
     <link rel="preload" href="./meta/leaderboard-euw1-challenger.json" as="fetch" crossorigin />
+    <link rel="preload" href="./meta/esports-ladder.json" as="fetch" crossorigin />
     <script>
       // Wake the API while the JS bundle loads (Render cold start).
       // If a Riot ID is linked, prefetch light recent-games and seed local cache.
@@ -28,6 +29,21 @@
           data._cachedAt = Date.now();
           try {
             localStorage.setItem('rift.lb.v1:euw1|challenger|soloq', JSON.stringify(data));
+          } catch (err) {}
+        }).catch(function () {});
+        fetch(API + '/v1/web/pros', {
+          mode: 'cors',
+          credentials: 'omit',
+        }).then(function (res) { return res.ok ? res.json() : null; }).then(function (data) {
+          if (!data || !Array.isArray(data.players) || !data.players.length) return;
+          data._cachedAt = Date.now();
+          try {
+            localStorage.setItem('rift.pros.v1:|||', JSON.stringify(data));
+            var keys = JSON.parse(localStorage.getItem('rift.pros.v1.keys') || '[]').filter(function (x) {
+              return x !== '|||';
+            });
+            keys.unshift('|||');
+            localStorage.setItem('rift.pros.v1.keys', JSON.stringify(keys.slice(0, 8)));
           } catch (err) {}
         }).catch(function () {});
         var session = JSON.parse(localStorage.getItem('rift-web-session') || 'null');

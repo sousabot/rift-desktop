@@ -4,9 +4,11 @@ import { HashRouter } from 'react-router-dom';
 import App from './App';
 import {
   hydrateLeaderboardFromSnapshot,
+  hydrateProsFromSnapshot,
   hydrateTierListFromSnapshot,
   prefetchDashboard,
   prefetchLeaderboard,
+  prefetchPros,
   prefetchTierList,
 } from './api';
 import './styles.css';
@@ -24,6 +26,8 @@ try {
       mode: 'soloq',
       limit: 5,
     }));
+  hydrateProsFromSnapshot({})
+    .finally(() => prefetchPros({}));
   if (session?.gameName && session?.tagLine) {
     prefetchDashboard({
       gameName: session.gameName,
@@ -45,6 +49,8 @@ try {
       mode: 'soloq',
       limit: 5,
     }));
+  hydrateProsFromSnapshot({})
+    .finally(() => prefetchPros({}));
 }
 
 createRoot(document.getElementById('root')).render(
