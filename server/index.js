@@ -73,13 +73,14 @@ function readJson(req) {
   });
 }
 
-function send(res, status, body) {
+function send(res, status, body, extraHeaders = {}) {
   const json = JSON.stringify(body);
   res.writeHead(status, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    ...extraHeaders,
   });
   res.end(json);
 }
@@ -234,7 +235,10 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       const data = await webHandler(req, url, serverRiotFetch);
-      send(res, 200, data);
+      const extra = (url.pathname === '/v1/web/tierlist' || url.pathname === '/v1/web/champion')
+        ? { 'Cache-Control': 'public, max-age=120, stale-while-revalidate=86400' }
+        : {};
+      send(res, 200, data, extra);
     } catch (err) {
       const status = err.status && err.status >= 400 && err.status < 600 ? err.status : 500;
       send(res, status, { error: publicError(err, 'Request failed. Try again in a moment.') });

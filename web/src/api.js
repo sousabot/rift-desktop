@@ -283,19 +283,94 @@ export function getLeaderboard({ tier = 'challenger', platform = 'euw1', mode = 
   return getJson(path, { timeoutMs: 60000 }).then((body) => assertFlexPayload(path, body));
 }
 
-export function getChampionDetail({
+const CHAMP_MEM = new Map();
+const CHAMP_INFLIGHT = new Map();
+const CHAMP_LS_KEYS = 'rift.champ.v1.keys';
+const CHAMP_LS_MAX = 10;
+
+function champCacheKey(platform, rank, role, champion) {
+  return [
+    String(platform || 'euw1').toLowerCase(),
+    String(rank || 'master').toLowerCase(),
+    String(role || 'Mid'),
+    String(champion || '').trim().toLowerCase(),
+  ].join('|');
+}
+
+function rememberChampionDetail(platform, rank, role, champion, data) {
+  if (!data || (!data.stats && !Array.isArray(data.builds))) return data;
+  const stored = { ...data, _cachedAt: Date.now() };
+  const k = champCacheKey(platform, rank, role, champion);
+  CHAMP_MEM.set(k, stored);
+  try {
+    localStorage.setItem(`rift.champ.v1:${k}`, JSON.stringify(stored));
+    const keys = JSON.parse(localStorage.getItem(CHAMP_LS_KEYS) || '[]')
+      .filter((x) => x !== k);
+    keys.unshift(k);
+    while (keys.length > CHAMP_LS_MAX) {
+      const drop = keys.pop();
+      try { localStorage.removeItem(`rift.champ.v1:${drop}`); } catch { /* ignore */ }
+    }
+    localStorage.setItem(CHAMP_LS_KEYS, JSON.stringify(keys));
+  } catch { /* quota / private mode */ }
+  return stored;
+}
+
+export function peekChampionDetail({
   champion,
   role = 'Mid',
   rank = 'master',
   platform = 'euw1',
 } = {}) {
-  const q = new URLSearchParams({
-    champion,
-    role,
-    rank,
-    platform,
-  });
-  return getJson(`/v1/web/champion?${q.toString()}`, { timeoutMs: 90000 });
+  const k = champCacheKey(platform, rank, role, champion);
+  if (CHAMP_MEM.has(k)) return CHAMP_MEM.get(k);
+  try {
+    const raw = localStorage.getItem(`rift.champ.v1:${k}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.stats && !Array.isArray(parsed?.builds)) return null;
+    if (Date.now() - (Number(parsed._cachedAt) || 0) > 24 * 60 * 60 * 1000) return null;
+    CHAMP_MEM.set(k, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function getChampionDetail({
+  champion,
+  role = 'Mid',
+  rank = 'master',
+  platform = 'euw1',
+  force = false,
+} = {}) {
+  const k = champCacheKey(platform, rank, role, champion);
+  const cached = !force ? peekChampionDetail({ champion, role, rank, platform }) : null;
+  if (!force && CHAMP_INFLIGHT.has(k)) {
+    return cached ? Promise.resolve(cached) : CHAMP_INFLIGHT.get(k);
+  }
+  const q = new URLSearchParams({ champion, role, rank, platform });
+  const job = getJson(`/v1/web/champion?${q.toString()}`, { timeoutMs: 90000 })
+    .then((data) => rememberChampionDetail(platform, rank, role, champion, data))
+    .finally(() => CHAMP_INFLIGHT.delete(k));
+  CHAMP_INFLIGHT.set(k, job);
+  if (cached) return Promise.resolve(cached);
+  return job;
+}
+
+export function refreshChampionDetail(args = {}) {
+  return getChampionDetail({ ...args, force: true });
+}
+
+export function prefetchChampionDetail(args = {}) {
+  const hit = peekChampionDetail(args);
+  const age = Date.now() - (Number(hit?._cachedAt) || 0);
+  if (hit && age < 10 * 60 * 1000) return Promise.resolve(hit);
+  if (hit) {
+    refreshChampionDetail(args).catch(() => {});
+    return Promise.resolve(hit);
+  }
+  return refreshChampionDetail(args).catch(() => null);
 }
 
 export function getDashboard({

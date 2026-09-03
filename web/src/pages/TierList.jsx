@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { peekTierList, hydrateTierListFromSnapshot, refreshTierList } from '../api';
+import { peekTierList, hydrateTierListFromSnapshot, refreshTierList, prefetchChampionDetail } from '../api';
 import { useSession } from '../session';
 import { REGIONS, champIconUrl, ddragonVersion, platformShort } from '../lib';
 import TierModeNav from '../components/TierModeNav';
@@ -324,7 +324,22 @@ export default function TierList() {
                   </span>
                 </div>
               ) : null}
-              <Link to={hrefFor(row)} className="tl-row">
+              <Link
+                to={hrefFor(row)}
+                className="tl-row"
+                onMouseEnter={() => prefetchChampionDetail({
+                  champion: row.champion,
+                  role: row.role,
+                  rank,
+                  platform,
+                })}
+                onFocus={() => prefetchChampionDetail({
+                  champion: row.champion,
+                  role: row.role,
+                  rank,
+                  platform,
+                })}
+              >
                 <span className="tl-rank tl-col-rank">{i + 1}</span>
                 <span className="tl-champ">
                   <img src={champIconUrl(row.champion, version)} alt="" width={30} height={30} loading="lazy" />

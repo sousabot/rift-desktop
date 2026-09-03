@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { getChampionDetail, getTierList } from '../api';
+import { peekChampionDetail, refreshChampionDetail, peekTierList, hydrateTierListFromSnapshot } from '../api';
 import {
   champCenteredUrl,
   champDdragonId,
@@ -213,10 +213,27 @@ export default function ChampionDetail() {
 
   const [version, setVersion] = useState('16.16.1');
   const [kit, setKit] = useState(null);
-  const [row, setRow] = useState(null);
+  const [row, setRow] = useState(() => {
+    const champ = decodeURIComponent(champParam || '');
+    const r = searchParams.get('role') || 'Mid';
+    const rk = searchParams.get('rank') || 'master';
+    const p = searchParams.get('platform') || 'euw1';
+    const tier = peekTierList({ platform: p, rank: rk });
+    return tier?.rows?.find((x) => x.champion.toLowerCase() === champ.toLowerCase() && x.role === r) || null;
+  });
   const [roleTotal, setRoleTotal] = useState(null);
-  const [detail, setDetail] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState(() => peekChampionDetail({
+    champion: decodeURIComponent(champParam || ''),
+    role: searchParams.get('role') || 'Mid',
+    rank: searchParams.get('rank') || 'master',
+    platform: searchParams.get('platform') || 'euw1',
+  }));
+  const [loading, setLoading] = useState(() => !peekChampionDetail({
+    champion: decodeURIComponent(champParam || ''),
+    role: searchParams.get('role') || 'Mid',
+    rank: searchParams.get('rank') || 'master',
+    platform: searchParams.get('platform') || 'euw1',
+  }));
   const [error, setError] = useState('');
   const [buildIdx, setBuildIdx] = useState(0);
   const [runeIndex, setRuneIndex] = useState({});
@@ -247,41 +264,71 @@ export default function ChampionDetail() {
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
     setError('');
     setBuildIdx(0);
     setMuLane('all');
     setMuQuery('');
     setMuExpanded(false);
-    Promise.all([
-      getTierList({ platform, rank }),
-      getChampionDetail({ champion, role, rank, platform }),
-    ])
-      .then(([tier, payload]) => {
-        if (!alive) return;
-        const rows = tier?.rows || [];
-        const match = rows.find((r) => r.champion.toLowerCase() === champion.toLowerCase() && r.role === role);
-        setRoleTotal(rows.filter((r) => r.role === role && !r.lowSample).length || null);
-        setRow(match || {
+
+    const applyTierRow = (tier) => {
+      const rows = tier?.rows || [];
+      const match = rows.find((r) => r.champion.toLowerCase() === champion.toLowerCase() && r.role === role);
+      setRoleTotal(rows.filter((r) => r.role === role && !r.lowSample).length || null);
+      if (match) setRow(match);
+      return match;
+    };
+
+    (async () => {
+      const cachedDetail = peekChampionDetail({ champion, role, rank, platform });
+      if (cachedDetail) {
+        setDetail(cachedDetail);
+        setLoading(false);
+      } else {
+        setLoading(true);
+        setDetail(null);
+      }
+
+      let tier = peekTierList({ platform, rank });
+      if (!tier) tier = await hydrateTierListFromSnapshot({ platform, rank });
+      if (!alive) return;
+      const match = applyTierRow(tier);
+      if (!match) {
+        setRow({
           champion,
           role,
           tier: '?',
           roleRank: '—',
-          winrate: payload?.stats?.winrate || 0,
-          pickrate: payload?.stats?.pickrate || 0,
-          banrate: payload?.stats?.banrate || 0,
-          games: payload?.stats?.analysed || 0,
+          winrate: cachedDetail?.stats?.winrate || 0,
+          pickrate: cachedDetail?.stats?.pickrate || 0,
+          banrate: cachedDetail?.stats?.banrate || 0,
+          games: cachedDetail?.stats?.analysed || 0,
           delta: 0,
         });
+      }
+
+      try {
+        const payload = await refreshChampionDetail({ champion, role, rank, platform });
+        if (!alive) return;
         setDetail(payload);
-      })
-      .catch((err) => {
-        if (alive) {
-          setError(err.message || 'Could not load champion detail.');
-          setDetail(null);
+        if (!match) {
+          setRow((prev) => ({
+            ...prev,
+            winrate: payload?.stats?.winrate || prev.winrate,
+            pickrate: payload?.stats?.pickrate || prev.pickrate,
+            banrate: payload?.stats?.banrate || prev.banrate,
+            games: payload?.stats?.analysed || prev.games,
+          }));
         }
-      })
-      .finally(() => { if (alive) setLoading(false); });
+      } catch (err) {
+        if (!alive) return;
+        if (cachedDetail) return;
+        setError(err.message || 'Could not load champion detail.');
+        setDetail(null);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+
     return () => { alive = false; };
   }, [champion, role, rank, platform]);
 
@@ -350,7 +397,8 @@ export default function ChampionDetail() {
         </div>
       </div>
 
-      {loading ? <div className="note">Loading champion detail…</div> : null}
+      {loading && !row ? <div className="note">Loading champion detail…</div> : null}
+      {loading && row && !detail?.builds?.length ? <div className="note">Updating builds…</div> : null}
       {error ? <div className="note is-error">{error}</div> : null}
 
       {row ? (
