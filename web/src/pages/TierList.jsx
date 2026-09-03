@@ -129,8 +129,16 @@ export default function TierList() {
       if (row.lowSample) return false;
       if (q && !String(row.champion).toLowerCase().includes(q)) return false;
       if (role !== 'all' && row.role !== role) return false;
-      // Primary role only — Aatrox Mid / Heimer Mid stay under Off-meta.
-      if (!offMeta && (row.isPrimary === false || Number(row.lanePct || 0) < 12)) return false;
+      // Role view: keep anyone with real presence in that lane (Sylas Jungle ~40%).
+      // All-roles view: primary only — tiny flex picks stay under Off-meta.
+      if (!offMeta) {
+        const lanePct = Number(row.lanePct) || 0;
+        if (role === 'all') {
+          if (row.isPrimary === false || lanePct < 12) return false;
+        } else if (lanePct < 12) {
+          return false;
+        }
+      }
       return true;
     });
     if (role === 'all') {
@@ -232,7 +240,7 @@ export default function TierList() {
         <select className="tl-select" value={rank} onChange={(e) => setRank(e.target.value)} aria-label="Rank">
           {RANKS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
         </select>
-        <label className={`tl-toggle${offMeta ? ' is-on' : ''}`} title="Include champions outside their main lane">
+        <label className={`tl-toggle${offMeta ? ' is-on' : ''}`} title="Include rare flex picks under 12% lane presence">
           <input type="checkbox" checked={offMeta} onChange={(e) => setOffMeta(e.target.checked)} />
           Off-meta
         </label>

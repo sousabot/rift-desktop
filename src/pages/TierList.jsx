@@ -164,7 +164,14 @@ export default function TierList() {
       if (row.lowSample) return false;
       if (q && !String(row.champion).toLowerCase().includes(q)) return false;
       if (role !== 'all' && row.role !== role) return false;
-      if (!offMeta && (row.isPrimary === false || row.lanePct < 12)) return false;
+      if (!offMeta) {
+        const lanePct = Number(row.lanePct) || 0;
+        if (role === 'all') {
+          if (row.isPrimary === false || lanePct < 12) return false;
+        } else if (lanePct < 12) {
+          return false;
+        }
+      }
       return true;
     });
     if (role === 'all') {

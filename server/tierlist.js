@@ -90,6 +90,7 @@ async function fetchJson(url) {
   try {
     body = await cloudscraper.get({
       uri: url,
+      timeout: 8000,
       headers: {
         Accept: 'application/json',
         Origin: 'https://dpm.lol',
@@ -125,7 +126,10 @@ const LOL_HEADERS = {
 
 async function fetchLolalyticsLane(lane, tier) {
   const q = new URLSearchParams({ ep: 'list', queue: '420', lane, tier });
-  const res = await fetch(`https://a1.lolalytics.com/mega/?${q}`, { headers: LOL_HEADERS });
+  const res = await fetch(`https://a1.lolalytics.com/mega/?${q}`, {
+    headers: LOL_HEADERS,
+    signal: AbortSignal.timeout(8000),
+  });
   if (!res.ok) throw new Error(`lolalytics ${res.status}`);
   return res.json();
 }
@@ -223,7 +227,7 @@ function lanePctOf(row) {
   return Number(share) || 0;
 }
 
-/** True when this row's lane is the champ's most-played role (ties count). */
+/** True when this lane is the champ's main role, or within 5pp of it (dual roles). */
 function isPrimaryLane(entry) {
   const lane = String(entry.lane || '').toUpperCase();
   const shares = entry.lanesPickrate || {};
@@ -233,7 +237,10 @@ function isPrimaryLane(entry) {
     .map(Number)
     .filter((n) => Number.isFinite(n));
   if (!values.length) return mine >= 40;
-  return mine + 0.05 >= Math.max(...values);
+  const top = Math.max(...values);
+  // DPM shares are 0–100. Allow near-ties so Sylas Jungle (~40%) counts with Mid (~43%).
+  const slack = top > 1.5 ? 5 : 0.05;
+  return mine + slack >= top;
 }
 
 function assignRoleTiers(rows) {
@@ -310,6 +317,33 @@ function rowsFromDpm(champions, names) {
   return rows;
 }
 
+async function fetchTierListDpm({ plat, tier, tf, names }) {
+  const q = new URLSearchParams({ platform: plat, tier, timeframe: tf });
+  const raw = await fetchJson(`https://dpm.lol/v1/tierlist?${q.toString()}`);
+  const rows = rowsFromDpm(raw?.champions, names);
+  assignGlobalRank(rows);
+  const wrSum = rows.reduce((s, r) => s + (r.winrate || 0) * (r.games || 0), 0);
+  const gameSum = rows.reduce((s, r) => s + (r.games || 0), 0);
+  const avgWr = gameSum > 0 ? wrSum / gameSum : null;
+  const patch = names.version
+    ? String(names.version).split('.').slice(0, 2).join('.')
+    : 'live';
+  return {
+    platform: plat,
+    rank: tier,
+    region: plat,
+    patch,
+    timeframe: tf,
+    matches: Number(raw?.total) || rows.length,
+    analysed: Number(raw?.total) || rows.length,
+    avgWr,
+    reliable: rows.length,
+    builtAt: Date.now(),
+    source: 'dpm',
+    rows,
+  };
+}
+
 async function fetchTierList({
   platform = 'euw1',
   rank = 'master',
@@ -319,38 +353,40 @@ async function fetchTierList({
   const tier = String(rank || 'master').toLowerCase();
   const tf = String(timeframe || DEFAULT_TIMEFRAME).toLowerCase();
   const names = await loadChampionNames();
+  const dpm = fetchTierListDpm({ plat, tier, tf, names }).then((data) => {
+    if (!data?.rows?.length) throw new Error('empty dpm');
+    return data;
+  });
+  const lol = fetchTierListLolalytics({ platform: plat, rank: tier, names }).then((data) => {
+    if (!data?.rows?.length) throw new Error('empty lolalytics');
+    return data;
+  });
   try {
-    const q = new URLSearchParams({ platform: plat, tier, timeframe: tf });
-    const raw = await fetchJson(`https://dpm.lol/v1/tierlist?${q.toString()}`);
-    const rows = rowsFromDpm(raw?.champions, names);
-    assignGlobalRank(rows);
-    const wrSum = rows.reduce((s, r) => s + (r.winrate || 0) * (r.games || 0), 0);
-    const gameSum = rows.reduce((s, r) => s + (r.games || 0), 0);
-    const avgWr = gameSum > 0 ? wrSum / gameSum : null;
-    const patch = names.version
-      ? String(names.version).split('.').slice(0, 2).join('.')
-      : 'live';
-    return {
-      platform: plat,
-      rank: tier,
-      region: plat,
-      patch,
-      timeframe: tf,
-      matches: Number(raw?.total) || rows.length,
-      analysed: Number(raw?.total) || rows.length,
-      avgWr,
-      reliable: rows.length,
-      builtAt: Date.now(),
-      source: 'dpm',
-      rows,
-    };
+    return await Promise.any([dpm, lol]);
   } catch (err) {
-    try {
-      const fallback = await fetchTierListLolalytics({ platform: plat, rank: tier, names });
-      if (fallback.rows.length >= 20) return fallback;
-    } catch { /* keep original */ }
     throw blockedError(err);
   }
+}
+
+function startRefresh(key, args) {
+  if (inflight.has(key)) return inflight.get(key);
+  const job = (async () => {
+    try {
+      const data = await fetchTierList(args);
+      const next = readAll();
+      next[key] = { at: Date.now(), data };
+      writeAll(next);
+      return data;
+    } catch (err) {
+      const cached = readAll()[key];
+      if (cached?.data?.rows?.length) {
+        return { ...cached.data, stale: true, error: 'Could not refresh the tier list.' };
+      }
+      throw err;
+    }
+  })().finally(() => inflight.delete(key));
+  inflight.set(key, job);
+  return job;
 }
 
 async function getTierList({
@@ -361,30 +397,16 @@ async function getTierList({
 } = {}) {
   // v5: 30-day DPM window (larger analysed sample).
   const key = `v5:${String(platform || 'euw1').toLowerCase()}:${String(rank || 'master')}:${String(timeframe || DEFAULT_TIMEFRAME).toLowerCase()}`;
-  const all = readAll();
-  const cached = all[key];
-  if (!force && cached?.data?.rows?.length >= 40 && Date.now() - cached.at < TTL_MS) {
-    return { ...cached.data, cached: true };
+  const cached = readAll()[key];
+  const hasRows = cached?.data?.rows?.length >= 40;
+  const fresh = hasRows && Date.now() - cached.at < TTL_MS;
+
+  if (!force && hasRows) {
+    if (!fresh) startRefresh(key, { platform, rank, timeframe });
+    return { ...cached.data, cached: true, stale: !fresh };
   }
   if (inflight.has(key)) return inflight.get(key);
-
-  const job = (async () => {
-    try {
-      const data = await fetchTierList({ platform, rank, timeframe });
-      const next = readAll();
-      next[key] = { at: Date.now(), data };
-      writeAll(next);
-      return data;
-    } catch (err) {
-      if (cached?.data?.rows?.length) {
-        return { ...cached.data, stale: true, error: 'Could not refresh the tier list.' };
-      }
-      throw err;
-    }
-  })().finally(() => inflight.delete(key));
-
-  inflight.set(key, job);
-  return job;
+  return startRefresh(key, { platform, rank, timeframe });
 }
 
 module.exports = { getTierList, DEFAULT_TIMEFRAME };
