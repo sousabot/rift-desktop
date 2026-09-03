@@ -373,6 +373,67 @@ export function prefetchChampionDetail(args = {}) {
   return refreshChampionDetail(args).catch(() => null);
 }
 
+const DASH_MEM = new Map();
+const DASH_INFLIGHT = new Map();
+const DASH_LS_KEYS = 'rift.dash.v1.keys';
+const DASH_LS_MAX = 4;
+
+function dashCacheKey(gameName, tagLine, platform, mode) {
+  return [
+    String(gameName || '').trim().toLowerCase(),
+    String(tagLine || '').trim().toLowerCase(),
+    String(platform || 'euw1').toLowerCase(),
+    String(mode || 'Solo'),
+  ].join('|');
+}
+
+function rememberDashboard(gameName, tagLine, platform, mode, data) {
+  if (!data || !Array.isArray(data.recentGames)) return data;
+  const stored = { ...data, _cachedAt: Date.now() };
+  const k = dashCacheKey(gameName, tagLine, platform, mode);
+  const prev = DASH_MEM.get(k);
+  // Keep a richer match list when a shorter home fetch returns first.
+  if (prev && (prev.recentGames?.length || 0) > (stored.recentGames?.length || 0)
+    && Date.now() - (Number(prev._cachedAt) || 0) < 10 * 60 * 1000) {
+    stored.recentGames = prev.recentGames;
+  }
+  DASH_MEM.set(k, stored);
+  try {
+    localStorage.setItem(`rift.dash.v1:${k}`, JSON.stringify(stored));
+    const keys = JSON.parse(localStorage.getItem(DASH_LS_KEYS) || '[]')
+      .filter((x) => x !== k);
+    keys.unshift(k);
+    while (keys.length > DASH_LS_MAX) {
+      const drop = keys.pop();
+      try { localStorage.removeItem(`rift.dash.v1:${drop}`); } catch { /* ignore */ }
+    }
+    localStorage.setItem(DASH_LS_KEYS, JSON.stringify(keys));
+  } catch { /* quota / private mode */ }
+  return stored;
+}
+
+export function peekDashboard({
+  gameName,
+  tagLine,
+  platform = 'euw1',
+  mode = 'Solo',
+} = {}) {
+  if (!gameName || !tagLine) return null;
+  const k = dashCacheKey(gameName, tagLine, platform, mode);
+  if (DASH_MEM.has(k)) return DASH_MEM.get(k);
+  try {
+    const raw = localStorage.getItem(`rift.dash.v1:${k}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.recentGames)) return null;
+    if (Date.now() - (Number(parsed._cachedAt) || 0) > 24 * 60 * 60 * 1000) return null;
+    DASH_MEM.set(k, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export function getDashboard({
   gameName,
   tagLine,
@@ -380,7 +441,13 @@ export function getDashboard({
   region,
   mode = 'Solo',
   count = 20,
+  force = false,
 } = {}) {
+  const k = dashCacheKey(gameName, tagLine, platform, mode);
+  const cached = !force ? peekDashboard({ gameName, tagLine, platform, mode }) : null;
+  if (!force && DASH_INFLIGHT.has(k)) {
+    return cached ? Promise.resolve(cached) : DASH_INFLIGHT.get(k);
+  }
   const q = new URLSearchParams({
     gameName,
     tagLine,
@@ -389,7 +456,27 @@ export function getDashboard({
     count: String(count),
   });
   if (region) q.set('region', region);
-  return getJson(`/v1/web/dashboard?${q.toString()}`, { timeoutMs: 120000 });
+  const job = getJson(`/v1/web/dashboard?${q.toString()}`, { timeoutMs: 120000 })
+    .then((data) => rememberDashboard(gameName, tagLine, platform, mode, data))
+    .finally(() => DASH_INFLIGHT.delete(k));
+  DASH_INFLIGHT.set(k, job);
+  if (cached) return Promise.resolve(cached);
+  return job;
+}
+
+export function refreshDashboard(args = {}) {
+  return getDashboard({ ...args, force: true });
+}
+
+export function prefetchDashboard(args = {}) {
+  const hit = peekDashboard(args);
+  const age = Date.now() - (Number(hit?._cachedAt) || 0);
+  if (hit && age < 2 * 60 * 1000) return Promise.resolve(hit);
+  if (hit) {
+    refreshDashboard({ ...args, count: args.count || 5 }).catch(() => {});
+    return Promise.resolve(hit);
+  }
+  return refreshDashboard({ ...args, count: args.count || 5 }).catch(() => null);
 }
 
 export function getCareerSidebar({ gameName, tagLine, platform = 'euw1', region } = {}) {

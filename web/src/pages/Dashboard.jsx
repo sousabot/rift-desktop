@@ -1,6 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { getCareerSidebar, getDashboard, getLiveGame, getMatchLp, lookupPro } from '../api';
+import {
+  getCareerSidebar,
+  getLiveGame,
+  getMatchLp,
+  lookupPro,
+  peekDashboard,
+  refreshDashboard,
+} from '../api';
 import { applyTrackedLp, formatLpDelta, syncMatchLp } from '../lib/lpHistory';
 import { useSession } from '../session';
 import {
@@ -725,14 +732,21 @@ export default function Dashboard() {
       return;
     }
     try {
-      const fetchDash = () => getDashboard({
+      const dashArgs = {
         gameName: parsed.gameName,
         tagLine: parsed.tagLine,
         platform: lookup.platform,
         region: lookup.region,
         mode: selectedMode,
         count: 20,
-      });
+      };
+      const cached = peekDashboard(dashArgs);
+      if (cached && reqId === loadSeq.current) {
+        setProfile(attachLocalLp(cached, selectedMode));
+        if (cached.ddragonVersion) setVersion(cached.ddragonVersion);
+        setLoading(false);
+      }
+      const fetchDash = () => refreshDashboard(dashArgs);
       let data = await fetchDash();
       const rankedPlayed = (Number(data?.solo?.wins) || 0) + (Number(data?.solo?.losses) || 0)
         + (Number(data?.flex?.wins) || 0) + (Number(data?.flex?.losses) || 0);
@@ -747,8 +761,15 @@ export default function Dashboard() {
       if (data.ddragonVersion) setVersion(data.ddragonVersion);
     } catch (err) {
       if (reqId !== loadSeq.current) return;
-      setProfile(null);
-      setLoadError(err.message || 'Could not load dashboard.');
+      if (!peekDashboard({
+        gameName: parsed.gameName,
+        tagLine: parsed.tagLine,
+        platform: lookup.platform,
+        mode: selectedMode,
+      })) {
+        setProfile(null);
+        setLoadError(err.message || 'Could not load dashboard.');
+      }
     } finally {
       if (reqId === loadSeq.current) setLoading(false);
     }

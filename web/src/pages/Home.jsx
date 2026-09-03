@@ -1,6 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getDashboard, getLeaderboard, peekTierList, hydrateTierListFromSnapshot, refreshTierList } from '../api';
+import {
+  getLeaderboard,
+  peekDashboard,
+  peekTierList,
+  hydrateTierListFromSnapshot,
+  refreshDashboard,
+  refreshTierList,
+} from '../api';
 import { getAppUrl } from '../getAppUrl';
 import { useSession } from '../session';
 import {
@@ -153,8 +160,23 @@ export default function Home() {
   const [tierLoading, setTierLoading] = useState(() => !peekTierList({ platform: session?.platform || 'euw1', rank: 'master' }));
   const [lbLoading, setLbLoading] = useState(true);
   const [searchPlatform, setSearchPlatform] = useState(session?.platform || 'euw1');
-  const [you, setYou] = useState(null);
-  const [youLoading, setYouLoading] = useState(false);
+  const [you, setYou] = useState(() => (session?.gameName && session?.tagLine
+    ? peekDashboard({
+      gameName: session.gameName,
+      tagLine: session.tagLine,
+      platform: session.platform || 'euw1',
+      mode: 'Solo',
+    })
+    : null));
+  const [youLoading, setYouLoading] = useState(() => {
+    if (!session?.gameName || !session?.tagLine) return false;
+    return !peekDashboard({
+      gameName: session.gameName,
+      tagLine: session.tagLine,
+      platform: session.platform || 'euw1',
+      mode: 'Solo',
+    });
+  });
   const [youError, setYouError] = useState('');
   const [youTick, setYouTick] = useState(0);
 
@@ -226,21 +248,30 @@ export default function Home() {
       return undefined;
     }
     let alive = true;
-    setYouLoading(true);
-    setYouError('');
-    getDashboard({
+    const args = {
       gameName: session.gameName,
       tagLine: session.tagLine,
       platform: session.platform || 'euw1',
       region: session.region,
       mode: 'Solo',
-      count: 20,
-    })
-      .then((payload) => { if (alive) setYou(payload); })
+      count: 5,
+    };
+    const cached = peekDashboard(args);
+    if (cached) {
+      setYou(cached);
+      setYouLoading(false);
+    } else {
+      setYouLoading(true);
+    }
+    setYouError('');
+    refreshDashboard(args)
+      .then((payload) => { if (alive && payload) setYou(payload); })
       .catch((err) => {
         if (!alive) return;
-        setYou(null);
-        setYouError(err.message || 'Could not load your games.');
+        if (!cached) {
+          setYou(null);
+          setYouError(err.message || 'Could not load your games.');
+        }
       })
       .finally(() => { if (alive) setYouLoading(false); });
     return () => { alive = false; };
