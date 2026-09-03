@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getTierList } from '../api';
+import { peekTierList, hydrateTierListFromSnapshot, refreshTierList } from '../api';
 import { useSession } from '../session';
 import { REGIONS, champIconUrl, ddragonVersion, platformShort } from '../lib';
 import TierModeNav from '../components/TierModeNav';
@@ -81,8 +81,8 @@ export default function TierList() {
   const [offMeta, setOffMeta] = useState(false);
   const [tierPick, setTierPick] = useState(null);
   const [sort, setSort] = useState({ key: 'meta', dir: 'desc' });
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(() => peekTierList({ platform: session?.platform || 'euw1', rank: 'master' }));
+  const [loading, setLoading] = useState(() => !peekTierList({ platform: session?.platform || 'euw1', rank: 'master' }));
   const [error, setError] = useState('');
   const [version, setVersion] = useState('16.16.1');
 
@@ -94,14 +94,32 @@ export default function TierList() {
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
     setError('');
-    getTierList({ platform, rank })
-      .then((payload) => { if (alive) setData(payload); })
-      .catch((err) => { if (alive) { setError(err.message || 'Tier list failed'); setData(null); } })
-      .finally(() => { if (alive) setLoading(false); });
+    (async () => {
+      let cached = peekTierList({ platform, rank });
+      if (!cached) {
+        cached = await hydrateTierListFromSnapshot({ platform, rank });
+      }
+      if (!alive) return;
+      if (cached) setData(cached);
+      setLoading(true);
+      try {
+        const payload = await refreshTierList({ platform, rank });
+        if (alive && payload) setData(payload);
+      } catch (err) {
+        if (!alive) return;
+        if (cached?.rows?.length) return;
+        setError(err.message || 'Tier list failed');
+        setData(null);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
     return () => { alive = false; };
   }, [platform, rank]);
+
+  const hasRows = Array.isArray(data?.rows) && data.rows.length > 0;
+  const refreshing = loading && hasRows;
 
   // Filters that the tier chips and sorting both sit on top of.
   const pool = useMemo(() => {
@@ -190,6 +208,7 @@ export default function TierList() {
           Live Solo/Duo ranked meta by role.
           {data?.patch ? ` Patch ${data.patch}.` : ''}
           {data?.analysed ? ` ${Number(data.analysed).toLocaleString()} games analysed.` : ''}
+          {refreshing ? <span className="tl-updating"> Updating…</span> : null}
         </p>
       </header>
 
@@ -225,7 +244,7 @@ export default function TierList() {
         />
       </div>
 
-      {!loading && !error && dist.length > 1 ? (
+      {!error && dist.length > 1 ? (
         <div className="tl-dist" role="group" aria-label="Filter by tier">
           {dist.map((d) => (
             <button
@@ -243,7 +262,7 @@ export default function TierList() {
         </div>
       ) : null}
 
-      {!loading && !error && (movers.up.length >= 2 || movers.down.length >= 2) ? (
+      {!error && (movers.up.length >= 2 || movers.down.length >= 2) ? (
         <div className="tl-movers">
           <MoversCard title="Rising this patch" rows={movers.up} version={version} dir="up" hrefFor={hrefFor} />
           <MoversCard title="Falling this patch" rows={movers.down} version={version} dir="down" hrefFor={hrefFor} />
@@ -264,7 +283,7 @@ export default function TierList() {
           <Th id="games" label="Games" num className="tl-col-games" />
         </div>
 
-        {loading ? Array.from({ length: 12 }, (_, i) => (
+        {loading && !hasRows ? Array.from({ length: 12 }, (_, i) => (
           <div className="tl-skel-row" key={i}>
             <span className="tl-skel tl-col-rank" />
             <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -280,7 +299,7 @@ export default function TierList() {
           </div>
         )) : null}
 
-        {!loading && !error ? rows.map((row, i) => {
+        {!error && hasRows ? rows.map((row, i) => {
           const wr = Number(row.winrate) || 0;
           const tone = wrTone(wr);
           const band = grouped && row.tier !== lastTier ? row.tier : null;

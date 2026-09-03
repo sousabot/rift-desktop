@@ -7,8 +7,20 @@
     <meta name="description" content="Link your Riot account, browse tier lists, and climb the leaderboards on Rift.lol." />
     <meta name="theme-color" content="#0b0e16" />
     <link rel="icon" href="./icon.png" />
-    <script type="module" crossorigin src="./assets/index-Bjz23IlD.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-CGu_pqYj.css">
+    <link rel="preconnect" href="https://gd-desktop.onrender.com" crossorigin />
+    <link rel="dns-prefetch" href="https://gd-desktop.onrender.com" />
+    <link rel="preload" href="./meta/tierlist-euw1-master.json" as="fetch" crossorigin />
+    <script>
+      // Wake the API while the JS bundle loads (Render cold start).
+      try {
+        fetch('https://gd-desktop.onrender.com/v1/web/tierlist?platform=euw1&rank=master', {
+          mode: 'cors',
+          credentials: 'omit',
+        }).catch(function () {});
+      } catch (e) {}
+    </script>
+    <script type="module" crossorigin src="./assets/index-CyfGrS7e.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-esOpgXTZ.css">
   </head>
   <body>
     <div id="root"></div>

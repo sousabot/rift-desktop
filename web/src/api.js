@@ -167,10 +167,114 @@ export function linkAccount({ gameName, tagLine, platform, region }) {
   return getJson(`/v1/web/account?${q.toString()}`);
 }
 
-export function getTierList({ platform = 'euw1', rank = 'master', force = false } = {}) {
+const TIER_MEM = new Map();
+const TIER_INFLIGHT = new Map();
+const TIER_SNAPSHOT_KEY = 'euw1|master';
+let tierSnapshotJob = null;
+
+function tierCacheKey(platform, rank) {
+  return `${String(platform || 'euw1').toLowerCase()}|${String(rank || 'master').toLowerCase()}`;
+}
+
+function rememberTierList(platform, rank, data) {
+  if (!Array.isArray(data?.rows) || data.rows.length < 20) return data;
+  const stored = { ...data, _cachedAt: Date.now() };
+  const k = tierCacheKey(platform, rank);
+  TIER_MEM.set(k, stored);
+  try {
+    localStorage.setItem(`rift.tierlist.v1:${k}`, JSON.stringify(stored));
+  } catch { /* quota / private mode */ }
+  return stored;
+}
+
+function fetchLiveTierList({ platform = 'euw1', rank = 'master', force = false } = {}) {
   const q = new URLSearchParams({ platform, rank });
   if (force) q.set('force', '1');
-  return getJson(`/v1/web/tierlist?${q.toString()}`);
+  const k = tierCacheKey(platform, rank);
+  if (!force && TIER_INFLIGHT.has(k)) return TIER_INFLIGHT.get(k);
+  const job = getJson(`/v1/web/tierlist?${q.toString()}`, { timeoutMs: 90000 })
+    .then((data) => rememberTierList(platform, rank, data))
+    .finally(() => TIER_INFLIGHT.delete(k));
+  TIER_INFLIGHT.set(k, job);
+  return job;
+}
+
+/** Same-origin snapshot shipped with GitHub Pages — paints before Render wakes up. */
+export function hydrateTierListFromSnapshot({ platform = 'euw1', rank = 'master' } = {}) {
+  const k = tierCacheKey(platform, rank);
+  const hit = peekTierList({ platform, rank });
+  if (hit) return Promise.resolve(hit);
+  if (k !== TIER_SNAPSHOT_KEY) return Promise.resolve(null);
+  if (tierSnapshotJob) return tierSnapshotJob;
+  const base = String(import.meta.env.BASE_URL || './').replace(/\/?$/, '/');
+  tierSnapshotJob = fetch(`${base}meta/tierlist-euw1-master.json`, { cache: 'force-cache' })
+    .then((res) => {
+      if (!res.ok) throw new Error(`snapshot ${res.status}`);
+      return res.json();
+    })
+    .then((data) => {
+      if (!Array.isArray(data?.rows) || data.rows.length < 20) return null;
+      return rememberTierList('euw1', 'master', {
+        ...data,
+        source: data.source || 'snapshot',
+        cached: true,
+        stale: true,
+      });
+    })
+    .catch(() => null);
+  return tierSnapshotJob;
+}
+
+export function getTierList({ platform = 'euw1', rank = 'master', force = false } = {}) {
+  if (force) return fetchLiveTierList({ platform, rank, force: true });
+  const cached = peekTierList({ platform, rank });
+  const live = fetchLiveTierList({ platform, rank, force: false });
+  if (cached) return Promise.resolve(cached);
+  const k = tierCacheKey(platform, rank);
+  if (k === TIER_SNAPSHOT_KEY) {
+    return Promise.any([
+      live,
+      hydrateTierListFromSnapshot({ platform, rank }).then((snap) => {
+        if (!snap) throw new Error('no snapshot');
+        return snap;
+      }),
+    ]).catch(() => live);
+  }
+  return live;
+}
+
+/** Always hits the API and writes through cache — use after showing peek/snapshot. */
+export function refreshTierList({ platform = 'euw1', rank = 'master' } = {}) {
+  return fetchLiveTierList({ platform, rank, force: false });
+}
+
+export function peekTierList({ platform = 'euw1', rank = 'master' } = {}) {
+  const k = tierCacheKey(platform, rank);
+  if (TIER_MEM.has(k)) return TIER_MEM.get(k);
+  try {
+    const raw = localStorage.getItem(`rift.tierlist.v1:${k}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.rows) || parsed.rows.length < 20) return null;
+    if (Date.now() - (Number(parsed._cachedAt) || 0) > 7 * 24 * 60 * 60 * 1000) return null;
+    TIER_MEM.set(k, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function prefetchTierList({ platform = 'euw1', rank = 'master' } = {}) {
+  const hit = peekTierList({ platform, rank });
+  const age = Date.now() - (Number(hit?._cachedAt) || 0);
+  if (hit && age < 10 * 60 * 1000) {
+    refreshTierList({ platform, rank }).catch(() => {});
+    return Promise.resolve(hit);
+  }
+  return hydrateTierListFromSnapshot({ platform, rank }).then((snap) => {
+    refreshTierList({ platform, rank }).catch(() => {});
+    return snap || refreshTierList({ platform, rank }).catch(() => hit || null);
+  });
 }
 
 export function getLeaderboard({ tier = 'challenger', platform = 'euw1', mode = 'soloq' } = {}) {

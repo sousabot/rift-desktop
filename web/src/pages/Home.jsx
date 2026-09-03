@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getDashboard, getLeaderboard, getTierList } from '../api';
+import { getDashboard, getLeaderboard, peekTierList, hydrateTierListFromSnapshot, refreshTierList } from '../api';
 import { getAppUrl } from '../getAppUrl';
 import { useSession } from '../session';
 import {
@@ -147,10 +147,10 @@ export default function Home() {
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [version, setVersion] = useState('16.16.1');
-  const [tierData, setTierData] = useState(null);
+  const [tierData, setTierData] = useState(() => peekTierList({ platform: session?.platform || 'euw1', rank: 'master' }));
   const [lbPlatform, setLbPlatform] = useState(session?.platform || 'euw1');
   const [lbData, setLbData] = useState(null);
-  const [tierLoading, setTierLoading] = useState(true);
+  const [tierLoading, setTierLoading] = useState(() => !peekTierList({ platform: session?.platform || 'euw1', rank: 'master' }));
   const [lbLoading, setLbLoading] = useState(true);
   const [searchPlatform, setSearchPlatform] = useState(session?.platform || 'euw1');
   const [you, setYou] = useState(null);
@@ -172,11 +172,27 @@ export default function Home() {
 
   useEffect(() => {
     let alive = true;
-    setTierLoading(true);
-    getTierList({ platform, rank: 'master' })
-      .then((payload) => { if (alive) setTierData(payload); })
-      .catch(() => { if (alive) setTierData(null); })
-      .finally(() => { if (alive) setTierLoading(false); });
+    (async () => {
+      let cached = peekTierList({ platform, rank: 'master' });
+      if (!cached) {
+        cached = await hydrateTierListFromSnapshot({ platform, rank: 'master' });
+      }
+      if (!alive) return;
+      if (cached) {
+        setTierData(cached);
+        setTierLoading(false);
+      } else {
+        setTierLoading(true);
+      }
+      try {
+        const payload = await refreshTierList({ platform, rank: 'master' });
+        if (alive && payload) setTierData(payload);
+      } catch {
+        if (alive && !cached) setTierData(null);
+      } finally {
+        if (alive) setTierLoading(false);
+      }
+    })();
     return () => { alive = false; };
   }, [platform]);
 
@@ -374,9 +390,9 @@ export default function Home() {
             <span>WR</span>
             <span>PR</span>
           </div>
-          {tierLoading ? <SkeletonRows count={5} /> : null}
+          {tierLoading && !tierRows.length ? <SkeletonRows count={5} /> : null}
           {!tierLoading && !tierRows.length ? <div className="home-widget-empty">Tier list unavailable.</div> : null}
-          {!tierLoading && tierRows.map((row) => (
+          {tierRows.map((row) => (
             <Link key={`${row.champion}-${row.role}`} className="home-widget-row" to="/tierlist">
               <span className="home-champ">
                 <img src={champIconUrl(row.champion, version)} alt="" />
