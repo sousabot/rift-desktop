@@ -6,6 +6,7 @@ import {
   getMatchLp,
   lookupPro,
   peekDashboard,
+  prefetchDashboard,
   refreshDashboard,
 } from '../api';
 import { applyTrackedLp, formatLpDelta, syncMatchLp } from '../lib/lpHistory';
@@ -684,9 +685,33 @@ export default function Dashboard() {
   const ownId = session ? `${session.gameName}#${session.tagLine}` : '';
   const activeId = (qName && qTag ? `${qName}#${qTag}` : ownId).trim();
   const viewingOther = Boolean(qName && qTag && (!ownId || activeId.toLowerCase() !== ownId.toLowerCase()));
+  const lookup = {
+    platform: qPlatform || session?.platform || 'euw1',
+    region: session?.region || '',
+  };
 
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(Boolean(activeId));
+  const [profile, setProfile] = useState(() => {
+    const parsed = parseRiotIdInput(activeId);
+    if (!parsed.gameName || !parsed.tagLine) return null;
+    const hit = peekDashboard({
+      gameName: parsed.gameName,
+      tagLine: parsed.tagLine,
+      platform: lookup.platform,
+      mode: 'Solo',
+    });
+    return hit ? attachLocalLp(hit, 'Solo') : null;
+  });
+  const [loading, setLoading] = useState(() => {
+    if (!activeId) return false;
+    const parsed = parseRiotIdInput(activeId);
+    if (!parsed.gameName || !parsed.tagLine) return false;
+    return !peekDashboard({
+      gameName: parsed.gameName,
+      tagLine: parsed.tagLine,
+      platform: lookup.platform,
+      mode: 'Solo',
+    });
+  });
   const [loadError, setLoadError] = useState('');
   const [mode, setMode] = useState('Solo');
   const [roleFilter, setRoleFilter] = useState('ALL');
@@ -707,11 +732,6 @@ export default function Dashboard() {
 
   useEffect(() => { setQuery(activeId); }, [activeId]);
 
-  const lookup = {
-    platform: qPlatform || session?.platform || 'euw1',
-    region: session?.region || '',
-  };
-
   const load = async (riotId, selectedMode = mode) => {
     if (!riotId) {
       setProfile(null);
@@ -720,7 +740,6 @@ export default function Dashboard() {
       return;
     }
     const reqId = ++loadSeq.current;
-    setLoading(true);
     setLoadError('');
     setExpandedId(null);
     const parsed = parseRiotIdInput(riotId);
@@ -731,42 +750,48 @@ export default function Dashboard() {
       setLoading(false);
       return;
     }
+    const dashArgs = {
+      gameName: parsed.gameName,
+      tagLine: parsed.tagLine,
+      platform: lookup.platform,
+      region: lookup.region,
+      mode: selectedMode,
+    };
+    const cached = peekDashboard(dashArgs);
+    if (cached && reqId === loadSeq.current) {
+      setProfile(attachLocalLp(cached, selectedMode));
+      if (cached.ddragonVersion) setVersion(cached.ddragonVersion);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
-      const dashArgs = {
-        gameName: parsed.gameName,
-        tagLine: parsed.tagLine,
-        platform: lookup.platform,
-        region: lookup.region,
-        mode: selectedMode,
-        count: 20,
-      };
-      const cached = peekDashboard(dashArgs);
-      if (cached && reqId === loadSeq.current) {
-        setProfile(attachLocalLp(cached, selectedMode));
-        if (cached.ddragonVersion) setVersion(cached.ddragonVersion);
-        setLoading(false);
+      const hasWarmFull = cached && !cached.light && (cached.recentGames?.length || 0) >= 8;
+      if (!hasWarmFull) {
+        const lightData = await refreshDashboard({ ...dashArgs, count: 8, light: true });
+        if (reqId !== loadSeq.current) return;
+        if (lightData) {
+          setProfile(attachLocalLp(lightData, selectedMode));
+          if (lightData.ddragonVersion) setVersion(lightData.ddragonVersion);
+          setLoading(false);
+        }
       }
-      const fetchDash = () => refreshDashboard(dashArgs);
-      let data = await fetchDash();
+      const fetchFull = () => refreshDashboard({ ...dashArgs, count: 20, light: false });
+      let data = await fetchFull();
       const rankedPlayed = (Number(data?.solo?.wins) || 0) + (Number(data?.solo?.losses) || 0)
         + (Number(data?.flex?.wins) || 0) + (Number(data?.flex?.losses) || 0);
       // Ranks can land while match-v5 is rate-limited — retry instead of showing 0 games.
       if (!(data?.recentGames || []).length && rankedPlayed > 0) {
         await new Promise((r) => setTimeout(r, 2500));
         if (reqId !== loadSeq.current) return;
-        data = await fetchDash();
+        data = await fetchFull();
       }
       if (reqId !== loadSeq.current) return;
       setProfile(attachLocalLp(data, selectedMode));
       if (data.ddragonVersion) setVersion(data.ddragonVersion);
     } catch (err) {
       if (reqId !== loadSeq.current) return;
-      if (!peekDashboard({
-        gameName: parsed.gameName,
-        tagLine: parsed.tagLine,
-        platform: lookup.platform,
-        mode: selectedMode,
-      })) {
+      if (!peekDashboard(dashArgs)) {
         setProfile(null);
         setLoadError(err.message || 'Could not load dashboard.');
       }
@@ -914,6 +939,15 @@ export default function Dashboard() {
     e.preventDefault();
     const parsed = parseRiotIdInput(query);
     if (!parsed.gameName || !parsed.tagLine) return;
+    prefetchDashboard({
+      gameName: parsed.gameName,
+      tagLine: parsed.tagLine,
+      platform: lookup.platform,
+      region: lookup.region,
+      mode: 'Solo',
+      count: 8,
+      light: true,
+    });
     setSearchParams({ name: parsed.gameName, tag: parsed.tagLine });
   };
 

@@ -528,6 +528,22 @@ function rememberDashboard(gameName, tagLine, platform, mode, data, light = fals
   return stored;
 }
 
+function readDashCache(gameName, tagLine, platform, mode, light) {
+  const k = dashCacheKey(gameName, tagLine, platform, mode, light);
+  if (DASH_MEM.has(k)) return DASH_MEM.get(k);
+  try {
+    const raw = localStorage.getItem(`rift.dash.v1:${k}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.recentGames)) return null;
+    if (Date.now() - (Number(parsed._cachedAt) || 0) > 24 * 60 * 60 * 1000) return null;
+    DASH_MEM.set(k, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 export function peekDashboard({
   gameName,
   tagLine,
@@ -536,24 +552,10 @@ export function peekDashboard({
   light = false,
 } = {}) {
   if (!gameName || !tagLine) return null;
-  const k = dashCacheKey(gameName, tagLine, platform, mode, light);
-  if (DASH_MEM.has(k)) return DASH_MEM.get(k);
-  try {
-    const raw = localStorage.getItem(`rift.dash.v1:${k}`);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed?.recentGames)
-        && Date.now() - (Number(parsed._cachedAt) || 0) <= 24 * 60 * 60 * 1000) {
-        DASH_MEM.set(k, parsed);
-        return parsed;
-      }
-    }
-  } catch { /* ignore */ }
-  // Home can reuse a full dashboard cache.
-  if (light) {
-    return peekDashboard({ gameName, tagLine, platform, mode, light: false });
-  }
-  return null;
+  const primary = readDashCache(gameName, tagLine, platform, mode, light);
+  if (primary) return primary;
+  // Home can reuse a full cache; player search can reuse a light cache.
+  return readDashCache(gameName, tagLine, platform, mode, !light);
 }
 
 export function getDashboard({

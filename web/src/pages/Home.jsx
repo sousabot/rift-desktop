@@ -6,6 +6,7 @@ import {
   peekDashboard,
   peekLeaderboard,
   peekTierList,
+  prefetchDashboard,
   refreshDashboard,
   refreshLeaderboard,
   refreshTierList,
@@ -349,6 +350,16 @@ export default function Home() {
     params.set('name', parsed.gameName);
     if (parsed.tagLine) params.set('tag', parsed.tagLine);
     if (searchPlatform) params.set('platform', searchPlatform);
+    if (parsed.gameName && parsed.tagLine) {
+      prefetchDashboard({
+        gameName: parsed.gameName,
+        tagLine: parsed.tagLine,
+        platform: searchPlatform || 'euw1',
+        mode: 'Solo',
+        count: 8,
+        light: true,
+      });
+    }
     navigate(`/dashboard?${params}`);
   };
 

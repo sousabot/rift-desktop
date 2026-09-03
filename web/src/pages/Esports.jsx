@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import RoleIcon from '../components/RoleIcon';
 import { countryName, flagUrl } from '../countryFlag';
 import { profileIconUrl, rankColor, rankImg, ddragonVersion } from '../lib';
-import { peekPros, hydrateProsFromSnapshot, refreshPros, getProPlayer } from '../api';
+import { peekPros, hydrateProsFromSnapshot, refreshPros, getProPlayer, prefetchDashboard } from '../api';
 import { t } from '../esportsStrings';
 import './Esports.css';
 
@@ -42,6 +42,7 @@ function playerSearchPath(riotId, fallbackTag = '', extra = {}) {
     name: parsed.gameName,
     tag: parsed.tagLine,
   });
+  if (extra.platform) params.set('platform', extra.platform);
   if (extra.player) params.set('pro', extra.player);
   if (extra.country) params.set('cc', extra.country);
   if (extra.team) params.set('org', extra.team);
@@ -49,6 +50,19 @@ function playerSearchPath(riotId, fallbackTag = '', extra = {}) {
   if (extra.league) params.set('lg', extra.league);
   if (extra.lane) params.set('ln', extra.lane);
   return `/dashboard?${params.toString()}`;
+}
+
+function prefetchPlayerDashboard(riotId, platform = 'euw1') {
+  const parsed = parseRiotId(riotId);
+  if (!parsed?.gameName || !parsed?.tagLine) return;
+  prefetchDashboard({
+    gameName: parsed.gameName,
+    tagLine: parsed.tagLine,
+    platform,
+    mode: 'Solo',
+    count: 8,
+    light: true,
+  });
 }
 
 
@@ -175,6 +189,7 @@ function PlayerSheet({ player, locale, t, onOpen, onClose }) {
           <Link
             className="pr-open"
             to={playerSearchPath(player.riotId, '', {
+              platform: player.accounts?.[0]?.platform || '',
               player: player.player,
               country: player.country,
               team: player.team,
@@ -182,6 +197,14 @@ function PlayerSheet({ player, locale, t, onOpen, onClose }) {
               league: player.league,
               lane: player.lane,
             })}
+            onMouseEnter={() => prefetchPlayerDashboard(
+              player.riotId,
+              player.accounts?.[0]?.platform || 'euw1',
+            )}
+            onFocus={() => prefetchPlayerDashboard(
+              player.riotId,
+              player.accounts?.[0]?.platform || 'euw1',
+            )}
           >
             {t('pros.openProfile')}
           </Link>
@@ -222,6 +245,7 @@ function PlayerSheet({ player, locale, t, onOpen, onClose }) {
                   <Link
                     className="pr-acc"
                     to={playerSearchPath(acc.riotId, '', {
+                      platform: acc.platform || '',
                       player: player.player,
                       country: player.country,
                       team: player.team,
@@ -229,6 +253,8 @@ function PlayerSheet({ player, locale, t, onOpen, onClose }) {
                       league: player.league,
                       lane: player.lane,
                     })}
+                    onMouseEnter={() => prefetchPlayerDashboard(acc.riotId, acc.platform || 'euw1')}
+                    onFocus={() => prefetchPlayerDashboard(acc.riotId, acc.platform || 'euw1')}
                   >
                     {acc.rank?.tier && rankImg(acc.rank.tier) ? (
                       <img src={rankImg(acc.rank.tier)} alt="" />
