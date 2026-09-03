@@ -376,28 +376,38 @@ export function prefetchChampionDetail(args = {}) {
 const DASH_MEM = new Map();
 const DASH_INFLIGHT = new Map();
 const DASH_LS_KEYS = 'rift.dash.v1.keys';
-const DASH_LS_MAX = 4;
+const DASH_LS_MAX = 6;
 
-function dashCacheKey(gameName, tagLine, platform, mode) {
+function dashCacheKey(gameName, tagLine, platform, mode, light = false) {
   return [
     String(gameName || '').trim().toLowerCase(),
     String(tagLine || '').trim().toLowerCase(),
     String(platform || 'euw1').toLowerCase(),
     String(mode || 'Solo'),
+    light ? 'L' : 'F',
   ].join('|');
 }
 
-function rememberDashboard(gameName, tagLine, platform, mode, data) {
+function rememberDashboard(gameName, tagLine, platform, mode, data, light = false) {
   if (!data || !Array.isArray(data.recentGames)) return data;
-  const stored = { ...data, _cachedAt: Date.now() };
-  const k = dashCacheKey(gameName, tagLine, platform, mode);
+  const stored = { ...data, _cachedAt: Date.now(), light: Boolean(light || data.light) };
+  const k = dashCacheKey(gameName, tagLine, platform, mode, light);
   const prev = DASH_MEM.get(k);
   // Keep a richer match list when a shorter home fetch returns first.
   if (prev && (prev.recentGames?.length || 0) > (stored.recentGames?.length || 0)
-    && Date.now() - (Number(prev._cachedAt) || 0) < 10 * 60 * 1000) {
+    && Date.now() - (Number(prev._cachedAt) || 0) < 10 * 60 * 1000
+    && !light) {
     stored.recentGames = prev.recentGames;
   }
   DASH_MEM.set(k, stored);
+  // Light home cache also helps when a full dashboard was loaded earlier.
+  if (!light) {
+    const lightKey = dashCacheKey(gameName, tagLine, platform, mode, true);
+    DASH_MEM.set(lightKey, stored);
+    try {
+      localStorage.setItem(`rift.dash.v1:${lightKey}`, JSON.stringify(stored));
+    } catch { /* ignore */ }
+  }
   try {
     localStorage.setItem(`rift.dash.v1:${k}`, JSON.stringify(stored));
     const keys = JSON.parse(localStorage.getItem(DASH_LS_KEYS) || '[]')
@@ -417,21 +427,27 @@ export function peekDashboard({
   tagLine,
   platform = 'euw1',
   mode = 'Solo',
+  light = false,
 } = {}) {
   if (!gameName || !tagLine) return null;
-  const k = dashCacheKey(gameName, tagLine, platform, mode);
+  const k = dashCacheKey(gameName, tagLine, platform, mode, light);
   if (DASH_MEM.has(k)) return DASH_MEM.get(k);
   try {
     const raw = localStorage.getItem(`rift.dash.v1:${k}`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed?.recentGames)) return null;
-    if (Date.now() - (Number(parsed._cachedAt) || 0) > 24 * 60 * 60 * 1000) return null;
-    DASH_MEM.set(k, parsed);
-    return parsed;
-  } catch {
-    return null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed?.recentGames)
+        && Date.now() - (Number(parsed._cachedAt) || 0) <= 24 * 60 * 60 * 1000) {
+        DASH_MEM.set(k, parsed);
+        return parsed;
+      }
+    }
+  } catch { /* ignore */ }
+  // Home can reuse a full dashboard cache.
+  if (light) {
+    return peekDashboard({ gameName, tagLine, platform, mode, light: false });
   }
+  return null;
 }
 
 export function getDashboard({
@@ -441,10 +457,11 @@ export function getDashboard({
   region,
   mode = 'Solo',
   count = 20,
+  light = false,
   force = false,
 } = {}) {
-  const k = dashCacheKey(gameName, tagLine, platform, mode);
-  const cached = !force ? peekDashboard({ gameName, tagLine, platform, mode }) : null;
+  const k = dashCacheKey(gameName, tagLine, platform, mode, light);
+  const cached = !force ? peekDashboard({ gameName, tagLine, platform, mode, light }) : null;
   if (!force && DASH_INFLIGHT.has(k)) {
     return cached ? Promise.resolve(cached) : DASH_INFLIGHT.get(k);
   }
@@ -456,8 +473,9 @@ export function getDashboard({
     count: String(count),
   });
   if (region) q.set('region', region);
+  if (light) q.set('light', '1');
   const job = getJson(`/v1/web/dashboard?${q.toString()}`, { timeoutMs: 120000 })
-    .then((data) => rememberDashboard(gameName, tagLine, platform, mode, data))
+    .then((data) => rememberDashboard(gameName, tagLine, platform, mode, data, light))
     .finally(() => DASH_INFLIGHT.delete(k));
   DASH_INFLIGHT.set(k, job);
   if (cached) return Promise.resolve(cached);
@@ -469,14 +487,15 @@ export function refreshDashboard(args = {}) {
 }
 
 export function prefetchDashboard(args = {}) {
-  const hit = peekDashboard(args);
+  const light = args.light !== false;
+  const hit = peekDashboard({ ...args, light });
   const age = Date.now() - (Number(hit?._cachedAt) || 0);
   if (hit && age < 2 * 60 * 1000) return Promise.resolve(hit);
   if (hit) {
-    refreshDashboard({ ...args, count: args.count || 5 }).catch(() => {});
+    refreshDashboard({ ...args, count: args.count || 5, light }).catch(() => {});
     return Promise.resolve(hit);
   }
-  return refreshDashboard({ ...args, count: args.count || 5 }).catch(() => null);
+  return refreshDashboard({ ...args, count: args.count || 5, light }).catch(() => null);
 }
 
 export function getCareerSidebar({ gameName, tagLine, platform = 'euw1', region } = {}) {

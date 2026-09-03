@@ -374,8 +374,9 @@ function registerWebApi(router) {
     const mode = url.searchParams.get('mode') || 'Solo';
     const queue = url.searchParams.get('queue');
     const count = url.searchParams.get('count') || '20';
+    const light = url.searchParams.get('light') || '';
     return getDashboard(riotFetch, {
-      gameName, tagLine, platform, region, mode, queue, count,
+      gameName, tagLine, platform, region, mode, queue, count, light,
     });
   });
 

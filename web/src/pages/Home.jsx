@@ -166,6 +166,7 @@ export default function Home() {
       tagLine: session.tagLine,
       platform: session.platform || 'euw1',
       mode: 'Solo',
+      light: true,
     })
     : null));
   const [youLoading, setYouLoading] = useState(() => {
@@ -175,6 +176,7 @@ export default function Home() {
       tagLine: session.tagLine,
       platform: session.platform || 'euw1',
       mode: 'Solo',
+      light: true,
     });
   });
   const [youError, setYouError] = useState('');
@@ -255,6 +257,7 @@ export default function Home() {
       region: session.region,
       mode: 'Solo',
       count: 5,
+      light: true,
     };
     const cached = peekDashboard(args);
     if (cached) {
@@ -264,17 +267,34 @@ export default function Home() {
       setYouLoading(true);
     }
     setYouError('');
+
+    // Early HTML prefetch may land in localStorage after first paint — pick it up.
+    const poll = window.setInterval(() => {
+      if (!alive) return;
+      const hit = peekDashboard(args);
+      if (hit) {
+        setYou(hit);
+        setYouLoading(false);
+        window.clearInterval(poll);
+      }
+    }, 200);
+    const pollStop = window.setTimeout(() => window.clearInterval(poll), 12000);
+
     refreshDashboard(args)
       .then((payload) => { if (alive && payload) setYou(payload); })
       .catch((err) => {
         if (!alive) return;
-        if (!cached) {
+        if (!peekDashboard(args)) {
           setYou(null);
           setYouError(err.message || 'Could not load your games.');
         }
       })
       .finally(() => { if (alive) setYouLoading(false); });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      window.clearInterval(poll);
+      window.clearTimeout(pollStop);
+    };
   }, [session?.gameName, session?.tagLine, session?.platform, session?.region, youTick]);
 
   const tierRows = useMemo(() => topTierRows(tierData, 5), [tierData]);

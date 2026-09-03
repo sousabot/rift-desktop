@@ -18,6 +18,7 @@ try {
       region: session.region,
       mode: 'Solo',
       count: 5,
+      light: true,
     });
   }
 } catch {

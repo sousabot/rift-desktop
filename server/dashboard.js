@@ -967,7 +967,163 @@ async function fetchRecentMatchIds(riotFetch, matchRegion, puuid, count, queue) 
   }
 }
 
-async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, mode, queue, count }) {
+function isLightDashboard(flag) {
+  return flag === true || flag === 1 || flag === '1' || String(flag || '').toLowerCase() === 'true';
+}
+
+/** Home widget: match list + rank only — no timelines / OP.GG / U.GG / mastery. */
+async function loadDashboardLight(riotFetch, { gameName, tagLine, platform, region, mode, queue, count }) {
+  const { lookupAccount, matchRegionOf } = require('./web-api');
+  const account = await lookupAccount(riotFetch, { gameName, tagLine, platform, region });
+  const shard = account.platform;
+  const matchRegion = account.region || matchRegionOf(shard);
+  const matchCount = Math.min(Math.max(Number(count) || 5, 1), 8);
+  const q = resolveModeQueue(mode, queue);
+
+  let matchIds = [];
+  const matchIdsJob = (async () => {
+    try {
+      return await fetchRecentMatchIds(riotFetch, matchRegion, account.puuid, matchCount, q);
+    } catch (err) {
+      const status = Number(err?.status) || 0;
+      if (status === 429 || status === 503) throw err;
+      return [];
+    }
+  })();
+
+  const rankedJob = riotFetch(
+    `https://${shard}.api.riotgames.com/lol/league/v4/entries/by-puuid/${account.puuid}`
+  ).catch(() => []);
+
+  const [matchIdsRaw, ranked, meta] = await Promise.all([
+    matchIdsJob,
+    rankedJob,
+    getChampionMeta(),
+  ]);
+  matchIds = Array.isArray(matchIdsRaw) ? matchIdsRaw : [];
+
+  let rateLimited = false;
+  const matches = await mapWithConcurrency(matchIds, MATCH_CONCURRENCY, async (id) => {
+    if (rateLimited) return null;
+    try {
+      return await riotFetch(`https://${matchRegion}.api.riotgames.com/lol/match/v5/matches/${id}`);
+    } catch (err) {
+      if (Number(err?.status) === 429 || Number(err?.status) === 503) rateLimited = true;
+      return null;
+    }
+  });
+
+  const loadedMatches = (matches || []).filter((m) => m?.info).length;
+  if (matchIds.length && !loadedMatches && rateLimited) {
+    const err = new Error('Riot API 429: rate limit exceeded');
+    err.status = 429;
+    throw err;
+  }
+
+  const puuid = account.puuid;
+  const recentGames = (matches || []).map((m) => {
+    if (!m?.info) return null;
+    if (q != null && Number(m.info.queueId) !== Number(q)) return null;
+    const p = m.info.participants?.find((pp) => pp.puuid === puuid);
+    if (!p) return null;
+    const mins = Math.max(1, m.info.gameDuration / 60);
+    const lanePos = p.teamPosition || p.individualPosition || '';
+    return {
+      matchId: m.metadata.matchId,
+      win: p.win,
+      champion: p.championName,
+      role: roleLabel(lanePos),
+      kills: p.kills,
+      deaths: p.deaths,
+      assists: p.assists,
+      cs: p.totalMinionsKilled + p.neutralMinionsKilled,
+      durationMin: Math.floor(mins),
+      kda: ((p.kills + p.assists) / Math.max(1, p.deaths)).toFixed(1),
+      ago: timeAgo(m.info.gameEndTimestamp),
+      endedAt: m.info.gameEndTimestamp || null,
+      queueId: m.info.queueId,
+      queueLabel: QUEUE_NAMES[m.info.queueId] || 'Other',
+    };
+  }).filter(Boolean).slice(0, matchCount);
+
+  const rankedList = Array.isArray(ranked) ? ranked : [];
+  const soloEntry = rankedList.find((r) => r.queueType === 'RANKED_SOLO_5x5') || null;
+  const flexEntry = rankedList.find((r) => r.queueType === 'RANKED_FLEX_SR') || null;
+  const soloRanked = formatRankEntry(soloEntry);
+  const flexRanked = formatRankEntry(flexEntry);
+  const rankedInfo = soloRank(ranked, q == null ? 420 : q);
+  const headerRank = soloRanked.rankTier
+    ? {
+      rank: soloRanked.rank,
+      lp: soloRanked.lp,
+      wins: soloRanked.wins,
+      losses: soloRanked.losses,
+      rankTier: soloRanked.rankTier,
+      rankDivision: soloRanked.rankDivision,
+      estMmr: soloRanked.estMmr ?? rankedInfo.estMmr,
+    }
+    : {
+      rank: rankedInfo.rank,
+      lp: rankedInfo.lp,
+      wins: rankedInfo.wins,
+      losses: rankedInfo.losses,
+      rankTier: rankedInfo.rankTier,
+      rankDivision: rankedInfo.rankDivision,
+      estMmr: rankedInfo.estMmr,
+    };
+
+  const recentWins = recentGames.filter((g) => g.win).length;
+  const riotId = `${account.gameName}#${account.tagLine}`;
+
+  return {
+    riotId,
+    gameName: account.gameName,
+    tagLine: account.tagLine,
+    puuid,
+    platform: shard,
+    region: PLATFORM_LABEL[shard] || String(shard).toUpperCase(),
+    matchRegion,
+    profileIconId: account.profileIconId || 29,
+    summonerLevel: account.summonerLevel ?? null,
+    rank: headerRank.rank,
+    ladderRank: null,
+    lp: headerRank.lp,
+    estMmr: headerRank.estMmr,
+    rankTier: headerRank.rankTier,
+    rankDivision: headerRank.rankDivision,
+    wins: headerRank.wins,
+    losses: headerRank.losses,
+    solo: soloRanked,
+    flex: flexRanked,
+    lpHistory: [],
+    seasonPeak: null,
+    overview: {
+      games: recentGames.length,
+      wins: recentWins,
+      losses: recentGames.length - recentWins,
+      winrate: recentGames.length ? Math.round((recentWins / recentGames.length) * 100) : 0,
+    },
+    championPool: [],
+    rolePerformance: [],
+    playedWith: [],
+    totalPings: {},
+    careerSidebar: false,
+    careerGames: 0,
+    stats: {},
+    sparklines: {},
+    lastGame: recentGames[0] || null,
+    recentGames,
+    collections: { played: 0, total: meta.total || 0 },
+    lens: { score: 50, series: [50], avgDeaths: 0 },
+    ddragonVersion: meta.version || null,
+    light: true,
+  };
+}
+
+async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, mode, queue, count, light }) {
+  if (isLightDashboard(light)) {
+    return loadDashboardLight(riotFetch, { gameName, tagLine, platform, region, mode, queue, count });
+  }
   const { lookupAccount, matchRegionOf } = require('./web-api');
   const account = await lookupAccount(riotFetch, { gameName, tagLine, platform, region });
   const shard = account.platform;
@@ -1350,20 +1506,41 @@ async function loadDashboard(riotFetch, { gameName, tagLine, platform, region, m
   };
 }
 
-async function getDashboard(riotFetch, opts) {
-  const key = [
+function dashboardCacheKey(opts) {
+  const light = isLightDashboard(opts.light);
+  return [
     String(opts.gameName || '').toLowerCase(),
     String(opts.tagLine || '').toLowerCase(),
     String(opts.platform || ''),
     String(opts.mode || 'Solo'),
     String(opts.queue ?? ''),
     String(opts.count || 20),
+    light ? 'L' : 'F',
   ].join('|');
+}
+
+async function getDashboard(riotFetch, opts) {
+  const light = isLightDashboard(opts.light);
+  const key = dashboardCacheKey(opts);
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < (hit.ttl || DASHBOARD_TTL_MS)) return hit.data;
+
+  // Home light request can reuse a fresh full dashboard for the same summoner.
+  if (light) {
+    const want = Math.min(Math.max(Number(opts.count) || 5, 1), 8);
+    for (const count of [20, 10, 5, want]) {
+      const fullKey = dashboardCacheKey({ ...opts, count, light: false });
+      const fullHit = cache.get(fullKey);
+      if (fullHit && Date.now() - fullHit.at < (fullHit.ttl || DASHBOARD_TTL_MS)
+        && (fullHit.data?.recentGames || []).length) {
+        return fullHit.data;
+      }
+    }
+  }
+
   if (inflight.has(key)) return inflight.get(key);
 
-  const pending = loadDashboard(riotFetch, opts)
+  const pending = loadDashboard(riotFetch, { ...opts, light })
     .then((data) => {
       const empty = !(data?.recentGames || []).length;
       cache.set(key, { at: Date.now(), data, ttl: empty ? 20 * 1000 : DASHBOARD_TTL_MS });

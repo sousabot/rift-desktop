@@ -12,11 +12,49 @@
     <link rel="preload" href="./meta/tierlist-euw1-master.json" as="fetch" crossorigin />
     <script>
       // Wake the API while the JS bundle loads (Render cold start).
+      // If a Riot ID is linked, prefetch light recent-games and seed local cache.
       try {
-        fetch('https://gd-desktop.onrender.com/v1/web/tierlist?platform=euw1&rank=master', {
+        var API = 'https://gd-desktop.onrender.com';
+        fetch(API + '/v1/web/tierlist?platform=euw1&rank=master', {
           mode: 'cors',
           credentials: 'omit',
         }).catch(function () {});
+        var session = JSON.parse(localStorage.getItem('rift-web-session') || 'null');
+        if (session && session.gameName && session.tagLine) {
+          var platform = session.platform || 'euw1';
+          var q = new URLSearchParams({
+            gameName: session.gameName,
+            tagLine: session.tagLine,
+            platform: platform,
+            mode: 'Solo',
+            count: '5',
+            light: '1',
+          });
+          if (session.region) q.set('region', session.region);
+          var cacheKey = [
+            String(session.gameName).trim().toLowerCase(),
+            String(session.tagLine).trim().toLowerCase(),
+            String(platform).toLowerCase(),
+            'Solo',
+            'L',
+          ].join('|');
+          fetch(API + '/v1/web/dashboard?' + q.toString(), {
+            mode: 'cors',
+            credentials: 'omit',
+          }).then(function (res) { return res.ok ? res.json() : null; }).then(function (data) {
+            if (!data || !Array.isArray(data.recentGames)) return;
+            data._cachedAt = Date.now();
+            data.light = true;
+            try {
+              localStorage.setItem('rift.dash.v1:' + cacheKey, JSON.stringify(data));
+              var keys = JSON.parse(localStorage.getItem('rift.dash.v1.keys') || '[]').filter(function (x) {
+                return x !== cacheKey;
+              });
+              keys.unshift(cacheKey);
+              localStorage.setItem('rift.dash.v1.keys', JSON.stringify(keys.slice(0, 6)));
+            } catch (err) {}
+          }).catch(function () {});
+        }
       } catch (e) {}
     </script>
   </head>
