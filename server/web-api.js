@@ -177,31 +177,44 @@ async function getLeaderboard(riotFetch, {
   tier = 'challenger',
   platform = 'euw1',
   queue = 'soloq',
+  limit = LEADERBOARD_LIMIT,
 } = {}) {
   const t = String(tier || 'challenger').toLowerCase();
   const plat = String(platform || 'euw1').toLowerCase();
   const region = matchRegionOf(plat);
   const qKey = String(queue || 'soloq').toLowerCase();
   const riotQueue = qKey === 'flex' ? 'RANKED_FLEX_SR' : 'RANKED_SOLO_5x5';
-  const key = `${plat}:${t}:${riotQueue}`;
+  const lim = Math.min(Math.max(Number(limit) || LEADERBOARD_LIMIT, 1), LEADERBOARD_LIMIT);
+  // Prefer a fresh full ladder; slice for home widgets.
+  const fullKey = `${plat}:${t}:${riotQueue}:n${LEADERBOARD_LIMIT}`;
+  const key = lim >= LEADERBOARD_LIMIT ? fullKey : `${plat}:${t}:${riotQueue}:n${lim}`;
+  const fullHit = leagueCache.get(fullKey);
+  if (fullHit && Date.now() - fullHit.at < (fullHit.ttl || LEAGUE_TTL_MS) && fullHit.data?.entries?.length) {
+    if (lim >= LEADERBOARD_LIMIT) return fullHit.data;
+    return {
+      ...fullHit.data,
+      limit: lim,
+      entries: fullHit.data.entries.slice(0, lim),
+    };
+  }
   const hit = leagueCache.get(key);
   if (hit && Date.now() - hit.at < (hit.ttl || LEAGUE_TTL_MS)) return hit.data;
   if (leagueInflight.has(key)) return leagueInflight.get(key);
 
   const work = buildLeaderboard(riotFetch, {
-    t, plat, region, qKey, riotQueue, key, stale: hit?.data,
+    t, plat, region, qKey, riotQueue, key, limit: lim, stale: hit?.data || fullHit?.data,
   }).finally(() => leagueInflight.delete(key));
   leagueInflight.set(key, work);
   return work;
 }
 
 async function buildLeaderboard(riotFetch, {
-  t, plat, region, qKey, riotQueue, key, stale,
+  t, plat, region, qKey, riotQueue, key, limit = LEADERBOARD_LIMIT, stale,
 }) {
   try {
     const entries = await loadLeagueEntries(riotFetch, t, riotQueue, plat);
     const ladder = [...entries].sort((a, b) => (b.leaguePoints || 0) - (a.leaguePoints || 0));
-    const top = ladder.slice(0, LEADERBOARD_LIMIT);
+    const top = ladder.slice(0, limit);
     const accountHost = region === 'sea' ? 'asia' : region;
 
     const identities = top.map((row) => {
@@ -230,7 +243,8 @@ async function buildLeaderboard(riotFetch, {
       } catch { /* leave unknown; retry next refresh */ }
     });
 
-    await mapWithConcurrency(top.slice(0, ICON_ENRICH_LIMIT), 3, async (row, i) => {
+    const iconLimit = Math.min(ICON_ENRICH_LIMIT, top.length);
+    await mapWithConcurrency(top.slice(0, iconLimit), 3, async (row, i) => {
       if (!row.puuid || identities[i].profileIconId) return;
       try {
         const summoner = await riotRetry(
@@ -275,7 +289,7 @@ async function buildLeaderboard(riotFetch, {
       platform: plat,
       region,
       builtAt: Date.now(),
-      limit: LEADERBOARD_LIMIT,
+      limit,
       totalEntries: ladder.length,
       cutoffLp: ladder.length ? (ladder[ladder.length - 1].leaguePoints || 0) : null,
       entries: rows,
@@ -283,11 +297,18 @@ async function buildLeaderboard(riotFetch, {
     leagueCache.set(key, {
       at: Date.now(),
       data: payload,
-      ttl: unknown > 10 ? 90 * 1000 : LEAGUE_TTL_MS,
+      ttl: unknown > Math.max(2, Math.floor(limit / 5)) ? 90 * 1000 : LEAGUE_TTL_MS,
     });
     return payload;
   } catch (err) {
-    if (stale?.entries?.length) return { ...stale, stale: true };
+    if (stale?.entries?.length) {
+      return {
+        ...stale,
+        stale: true,
+        limit,
+        entries: stale.entries.slice(0, limit),
+      };
+    }
     throw err;
   }
 }
@@ -315,6 +336,7 @@ function registerWebApi(router) {
     const tier = url.searchParams.get('tier') || 'challenger';
     const platform = url.searchParams.get('platform') || 'euw1';
     const mode = String(url.searchParams.get('mode') || url.searchParams.get('queue') || 'soloq').toLowerCase();
+    const limit = url.searchParams.get('limit') || '';
     if (mode === 'aram') {
       return {
         mode: 'aram',
@@ -327,7 +349,12 @@ function registerWebApi(router) {
       };
     }
     const queue = mode === 'flex' ? 'flex' : 'soloq';
-    return getLeaderboard(riotFetch, { tier, platform, queue });
+    return getLeaderboard(riotFetch, {
+      tier,
+      platform,
+      queue,
+      limit: limit ? Number(limit) : undefined,
+    });
   });
 
   router.get('/v1/web/champion', async (req, url) => {

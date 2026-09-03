@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  getLeaderboard,
-  peekDashboard,
-  peekTierList,
+  hydrateLeaderboardFromSnapshot,
   hydrateTierListFromSnapshot,
+  peekDashboard,
+  peekLeaderboard,
+  peekTierList,
   refreshDashboard,
+  refreshLeaderboard,
   refreshTierList,
 } from '../api';
 import { getAppUrl } from '../getAppUrl';
@@ -156,9 +158,21 @@ export default function Home() {
   const [version, setVersion] = useState('16.16.1');
   const [tierData, setTierData] = useState(() => peekTierList({ platform: session?.platform || 'euw1', rank: 'master' }));
   const [lbPlatform, setLbPlatform] = useState(session?.platform || 'euw1');
-  const [lbData, setLbData] = useState(null);
+  const [lbData, setLbData] = useState(() => peekLeaderboard({
+    tier: 'challenger',
+    platform: session?.platform && LB_PLATFORMS.some((p) => p.id === session.platform)
+      ? session.platform
+      : 'euw1',
+    mode: 'soloq',
+  }));
   const [tierLoading, setTierLoading] = useState(() => !peekTierList({ platform: session?.platform || 'euw1', rank: 'master' }));
-  const [lbLoading, setLbLoading] = useState(true);
+  const [lbLoading, setLbLoading] = useState(() => !peekLeaderboard({
+    tier: 'challenger',
+    platform: session?.platform && LB_PLATFORMS.some((p) => p.id === session.platform)
+      ? session.platform
+      : 'euw1',
+    mode: 'soloq',
+  }));
   const [searchPlatform, setSearchPlatform] = useState(session?.platform || 'euw1');
   const [you, setYou] = useState(() => (session?.gameName && session?.tagLine
     ? peekDashboard({
@@ -222,23 +236,38 @@ export default function Home() {
 
   useEffect(() => {
     let alive = true;
-    setLbLoading(true);
-    const load = (attempt) => getLeaderboard({ tier: 'challenger', platform: lbPlatform })
-      .then((payload) => {
-        if (!alive) return;
-        if (payload?.entries?.length) {
-          setLbData(payload);
-          return;
+    (async () => {
+      let cached = peekLeaderboard({ tier: 'challenger', platform: lbPlatform, mode: 'soloq' });
+      if (!cached && lbPlatform === 'euw1') {
+        cached = await hydrateLeaderboardFromSnapshot({
+          tier: 'challenger',
+          platform: 'euw1',
+          mode: 'soloq',
+        });
+      }
+      if (!alive) return;
+      if (cached) {
+        setLbData(cached);
+        setLbLoading(false);
+      } else {
+        setLbLoading(true);
+      }
+      try {
+        const payload = await refreshLeaderboard({
+          tier: 'challenger',
+          platform: lbPlatform,
+          mode: 'soloq',
+          limit: 5,
+        });
+        if (alive && payload?.entries?.length) setLbData(payload);
+      } catch {
+        if (alive && !cached) {
+          setLbData((prev) => (prev?.platform === lbPlatform && prev.entries?.length ? prev : null));
         }
-        if (attempt < 1) return load(attempt + 1);
-        setLbData((prev) => (prev?.platform === lbPlatform && prev.entries?.length ? prev : payload));
-      })
-      .catch(() => {
-        if (!alive) return;
-        if (attempt < 1) return load(attempt + 1);
-        setLbData((prev) => (prev?.platform === lbPlatform && prev.entries?.length ? prev : null));
-      });
-    load(0).finally(() => { if (alive) setLbLoading(false); });
+      } finally {
+        if (alive) setLbLoading(false);
+      }
+    })();
     return () => { alive = false; };
   }, [lbPlatform]);
 
@@ -485,9 +514,9 @@ export default function Home() {
             <span>LP</span>
             <span>WR</span>
           </div>
-          {lbLoading ? <SkeletonRows count={5} variant="home-widget-row-lb" /> : null}
+          {lbLoading && !lbRows.length ? <SkeletonRows count={5} variant="home-widget-row-lb" /> : null}
           {!lbLoading && !lbRows.length ? <div className="home-widget-empty">Leaderboards unavailable.</div> : null}
-          {!lbLoading && lbRows.map((row) => (
+          {lbRows.map((row) => (
             <Link key={row.puuid || row.rank} className="home-widget-row home-widget-row-lb" to="/leaderboard">
               <span className="mono muted">{row.rank}</span>
               <span className="home-champ">

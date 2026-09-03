@@ -277,10 +277,116 @@ export function prefetchTierList({ platform = 'euw1', rank = 'master' } = {}) {
   });
 }
 
-export function getLeaderboard({ tier = 'challenger', platform = 'euw1', mode = 'soloq' } = {}) {
+const LB_MEM = new Map();
+const LB_INFLIGHT = new Map();
+const LB_SNAPSHOT_KEY = 'euw1|challenger|soloq';
+let lbSnapshotJob = null;
+
+function lbCacheKey(tier, platform, mode) {
+  return [
+    String(platform || 'euw1').toLowerCase(),
+    String(tier || 'challenger').toLowerCase(),
+    String(mode || 'soloq').toLowerCase(),
+  ].join('|');
+}
+
+function rememberLeaderboard(tier, platform, mode, data) {
+  if (!Array.isArray(data?.entries) || !data.entries.length) return data;
+  const stored = { ...data, _cachedAt: Date.now() };
+  const k = lbCacheKey(tier, platform, mode);
+  const prev = LB_MEM.get(k);
+  if (prev && (prev.entries?.length || 0) > (stored.entries?.length || 0)
+    && Date.now() - (Number(prev._cachedAt) || 0) < 30 * 60 * 1000) {
+    stored.entries = prev.entries;
+  }
+  LB_MEM.set(k, stored);
+  try {
+    localStorage.setItem(`rift.lb.v1:${k}`, JSON.stringify(stored));
+  } catch { /* quota / private mode */ }
+  return stored;
+}
+
+export function peekLeaderboard({ tier = 'challenger', platform = 'euw1', mode = 'soloq' } = {}) {
+  const k = lbCacheKey(tier, platform, mode);
+  if (LB_MEM.has(k)) return LB_MEM.get(k);
+  try {
+    const raw = localStorage.getItem(`rift.lb.v1:${k}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.entries) || !parsed.entries.length) return null;
+    if (Date.now() - (Number(parsed._cachedAt) || 0) > 24 * 60 * 60 * 1000) return null;
+    LB_MEM.set(k, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function hydrateLeaderboardFromSnapshot({
+  tier = 'challenger',
+  platform = 'euw1',
+  mode = 'soloq',
+} = {}) {
+  const k = lbCacheKey(tier, platform, mode);
+  const hit = peekLeaderboard({ tier, platform, mode });
+  if (hit) return Promise.resolve(hit);
+  if (k !== LB_SNAPSHOT_KEY) return Promise.resolve(null);
+  if (lbSnapshotJob) return lbSnapshotJob;
+  const base = String(import.meta.env.BASE_URL || './').replace(/\/?$/, '/');
+  lbSnapshotJob = fetch(`${base}meta/leaderboard-euw1-challenger.json`, { cache: 'force-cache' })
+    .then((res) => {
+      if (!res.ok) throw new Error(`snapshot ${res.status}`);
+      return res.json();
+    })
+    .then((data) => {
+      if (!Array.isArray(data?.entries) || !data.entries.length) return null;
+      return rememberLeaderboard('challenger', 'euw1', 'soloq', {
+        ...data,
+        source: data.source || 'snapshot',
+        stale: true,
+      });
+    })
+    .catch(() => null);
+  return lbSnapshotJob;
+}
+
+export function getLeaderboard({
+  tier = 'challenger',
+  platform = 'euw1',
+  mode = 'soloq',
+  limit,
+  force = false,
+} = {}) {
+  const k = lbCacheKey(tier, platform, mode);
+  const cached = !force ? peekLeaderboard({ tier, platform, mode }) : null;
+  if (!force && LB_INFLIGHT.has(k)) {
+    return cached ? Promise.resolve(cached) : LB_INFLIGHT.get(k);
+  }
   const q = new URLSearchParams({ tier, platform, mode });
+  if (limit) q.set('limit', String(limit));
   const path = `/v1/web/leaderboard?${q.toString()}`;
-  return getJson(path, { timeoutMs: 60000 }).then((body) => assertFlexPayload(path, body));
+  const job = getJson(path, { timeoutMs: 60000 })
+    .then((body) => assertFlexPayload(path, body))
+    .then((data) => rememberLeaderboard(tier, platform, mode, data))
+    .finally(() => LB_INFLIGHT.delete(k));
+  LB_INFLIGHT.set(k, job);
+  if (cached) return Promise.resolve(cached);
+  return job;
+}
+
+export function refreshLeaderboard(args = {}) {
+  return getLeaderboard({ ...args, force: true });
+}
+
+export function prefetchLeaderboard(args = {}) {
+  const hit = peekLeaderboard(args);
+  const age = Date.now() - (Number(hit?._cachedAt) || 0);
+  if (hit && age < 5 * 60 * 1000) return Promise.resolve(hit);
+  if (hit) {
+    refreshLeaderboard({ ...args, limit: args.limit || 5 }).catch(() => {});
+    return Promise.resolve(hit);
+  }
+  return refreshLeaderboard({ ...args, limit: args.limit || 5 }).catch(() => null);
 }
 
 const CHAMP_MEM = new Map();

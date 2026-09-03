@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://gd-desktop.onrender.com" crossorigin />
     <link rel="dns-prefetch" href="https://gd-desktop.onrender.com" />
     <link rel="preload" href="./meta/tierlist-euw1-master.json" as="fetch" crossorigin />
+    <link rel="preload" href="./meta/leaderboard-euw1-challenger.json" as="fetch" crossorigin />
     <script>
       // Wake the API while the JS bundle loads (Render cold start).
       // If a Riot ID is linked, prefetch light recent-games and seed local cache.
@@ -18,6 +19,16 @@
         fetch(API + '/v1/web/tierlist?platform=euw1&rank=master', {
           mode: 'cors',
           credentials: 'omit',
+        }).catch(function () {});
+        fetch(API + '/v1/web/leaderboard?tier=challenger&platform=euw1&mode=soloq&limit=5', {
+          mode: 'cors',
+          credentials: 'omit',
+        }).then(function (res) { return res.ok ? res.json() : null; }).then(function (data) {
+          if (!data || !Array.isArray(data.entries) || !data.entries.length) return;
+          data._cachedAt = Date.now();
+          try {
+            localStorage.setItem('rift.lb.v1:euw1|challenger|soloq', JSON.stringify(data));
+          } catch (err) {}
         }).catch(function () {});
         var session = JSON.parse(localStorage.getItem('rift-web-session') || 'null');
         if (session && session.gameName && session.tagLine) {
@@ -57,7 +68,7 @@
         }
       } catch (e) {}
     </script>
-    <script type="module" crossorigin src="./assets/index-dCVwEXXB.js"></script>
+    <script type="module" crossorigin src="./assets/index-DaBlrP7e.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-esOpgXTZ.css">
   </head>
   <body>

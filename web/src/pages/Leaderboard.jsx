@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { getLeaderboard, getOtps } from '../api';
+import { getOtps, peekLeaderboard, refreshLeaderboard } from '../api';
 import { useSession } from '../session';
 import {
   REGIONS,
@@ -226,8 +226,20 @@ export default function Leaderboard() {
     modeParam === 'otps' ? (searchParams.get('platform') || 'all') : (session?.platform || 'euw1')
   ));
   const [query, setQuery] = useState('');
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(() => {
+    if (modeParam === 'otps') return null;
+    const m = MODES.some((x) => x.id === modeParam) ? modeParam : 'soloq';
+    const t = TIERS.some((x) => x.id === tierParam) ? tierParam : 'challenger';
+    const p = session?.platform || 'euw1';
+    return peekLeaderboard({ tier: t, platform: p, mode: m });
+  });
+  const [loading, setLoading] = useState(() => {
+    if (modeParam === 'otps') return true;
+    const m = MODES.some((x) => x.id === modeParam) ? modeParam : 'soloq';
+    const t = TIERS.some((x) => x.id === tierParam) ? tierParam : 'challenger';
+    const p = session?.platform || 'euw1';
+    return !peekLeaderboard({ tier: t, platform: p, mode: m });
+  });
   const [error, setError] = useState('');
   const [retryTick, setRetryTick] = useState(0);
   const [version, setVersion] = useState('16.16.1');
@@ -257,13 +269,35 @@ export default function Leaderboard() {
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
     setError('');
-    const req = mode === 'otps'
-      ? getOtps({ platform, lane, all: true })
-      : getLeaderboard({ tier, platform: platform === 'all' ? 'euw1' : platform, mode });
+    if (mode === 'otps') {
+      setLoading(true);
+      getOtps({ platform, lane, all: true })
+        .then((payload) => {
+          if (!alive) return;
+          setData(payload);
+          if (payload?.ddragonVersion) setVersion(payload.ddragonVersion);
+        })
+        .catch((err) => {
+          if (alive) {
+            setError(err.message || 'Leaderboard failed');
+            setData((prev) => (prev?.entries?.length ? prev : null));
+          }
+        })
+        .finally(() => { if (alive) setLoading(false); });
+      return () => { alive = false; };
+    }
 
-    req
+    const plat = platform === 'all' ? 'euw1' : platform;
+    const cached = peekLeaderboard({ tier, platform: plat, mode });
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
+    refreshLeaderboard({ tier, platform: plat, mode })
       .then((payload) => {
         if (!alive) return;
         setData(payload);
